@@ -1,0 +1,23 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+backend/uploads/
+*.log
+npm-debug.log*
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Claude Code (local-machine permissions, not shared config)
+.claude/settings.local.json
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json

@@ -1,0 +1,24 @@
+{
+  "name": "synapse-backend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "nodemon server.js",
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.99.1",
+    "bcryptjs": "2.4.3",
+    "connect-mongo": "5.1.0",
+    "cors": "2.8.5",
+    "dotenv": "16.4.5",
+    "express": "4.22.2",
+    "express-session": "1.19.0",
+    "mongoose": "8.24.2",
+    "multer": "2.2.0"
+  },
+  "devDependencies": {
+    "nodemon": "3.1.7"
+  }
+}

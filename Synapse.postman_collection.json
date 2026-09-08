@@ -1,0 +1,390 @@
+{
+  "info": {
+    "name": "Synapse AI",
+    "description": "Backend (Express) and AI service (FastAPI) endpoints. Postman keeps a cookie jar per domain automatically, so run Register/Login once and the session cookie carries into the Chat requests below.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:5000" },
+    { "key": "aiServiceUrl", "value": "http://localhost:8000" },
+    { "key": "conversationId", "value": "" },
+    { "key": "documentId", "value": "" },
+    { "key": "quizId", "value": "" },
+    { "key": "flashcardSetId", "value": "" },
+    { "key": "resetToken", "value": "" },
+    { "key": "registrationOtp", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Backend - Auth",
+      "item": [
+        {
+          "name": "1. Register (sends OTP, no account yet)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "if (body.otp) pm.collectionVariables.set('registrationOtp', body.otp);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Test Student\",\n  \"email\": \"test@example.com\",\n  \"password\": \"Test@1234\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/auth/register", "host": ["{{baseUrl}}"], "path": ["api", "auth", "register"] }
+          }
+        },
+        {
+          "name": "2. Verify registration (creates account + session)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"test@example.com\",\n  \"otp\": \"{{registrationOtp}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/verify-registration",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "verify-registration"]
+            }
+          }
+        },
+        {
+          "name": "Resend registration OTP",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "if (body.otp) pm.collectionVariables.set('registrationOtp', body.otp);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"test@example.com\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/resend-registration-otp",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "resend-registration-otp"]
+            }
+          }
+        },
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"test@example.com\",\n  \"password\": \"Test@1234\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/auth/login", "host": ["{{baseUrl}}"], "path": ["api", "auth", "login"] }
+          }
+        },
+        {
+          "name": "Me",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/api/auth/me", "host": ["{{baseUrl}}"], "path": ["api", "auth", "me"] }
+          }
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{baseUrl}}/api/auth/logout", "host": ["{{baseUrl}}"], "path": ["api", "auth", "logout"] }
+          }
+        },
+        {
+          "name": "Forgot password",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "if (body.resetUrl) pm.collectionVariables.set('resetToken', new URL(body.resetUrl).searchParams.get('token'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"test@example.com\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/auth/forgot-password", "host": ["{{baseUrl}}"], "path": ["api", "auth", "forgot-password"] }
+          }
+        },
+        {
+          "name": "Reset password",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"token\": \"{{resetToken}}\",\n  \"password\": \"newPassword123\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/auth/reset-password", "host": ["{{baseUrl}}"], "path": ["api", "auth", "reset-password"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Backend - Chat",
+      "item": [
+        {
+          "name": "List conversations",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/api/chat/conversations", "host": ["{{baseUrl}}"], "path": ["api", "chat", "conversations"] }
+          }
+        },
+        {
+          "name": "Create conversation",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "if (body.conversation) pm.collectionVariables.set('conversationId', body.conversation.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"title\": \"My first chat\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/chat/conversations", "host": ["{{baseUrl}}"], "path": ["api", "chat", "conversations"] }
+          }
+        },
+        {
+          "name": "Get messages",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/chat/conversations/{{conversationId}}/messages",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "chat", "conversations", "{{conversationId}}", "messages"]
+            }
+          }
+        },
+        {
+          "name": "Send message",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"text\": \"What can you do?\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/chat/conversations/{{conversationId}}/messages",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "chat", "conversations", "{{conversationId}}", "messages"]
+            }
+          }
+        },
+        {
+          "name": "Delete conversation",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/api/chat/conversations/{{conversationId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "chat", "conversations", "{{conversationId}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Backend - Documents",
+      "item": [
+        {
+          "name": "List documents",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/api/documents", "host": ["{{baseUrl}}"], "path": ["api", "documents"] }
+          }
+        },
+        {
+          "name": "Upload document",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "if (body.document) pm.collectionVariables.set('documentId', body.document.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "body": { "mode": "formdata", "formdata": [{ "key": "file", "type": "file", "src": [] }] },
+            "url": { "raw": "{{baseUrl}}/api/documents", "host": ["{{baseUrl}}"], "path": ["api", "documents"] }
+          }
+        },
+        {
+          "name": "Download document",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/documents/{{documentId}}/download",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "documents", "{{documentId}}", "download"]
+            }
+          }
+        },
+        {
+          "name": "Delete document",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/api/documents/{{documentId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "documents", "{{documentId}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Backend - Quizzes",
+      "item": [
+        {
+          "name": "List quizzes",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/api/quizzes", "host": ["{{baseUrl}}"], "path": ["api", "quizzes"] }
+          }
+        },
+        {
+          "name": "Create quiz",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "if (body.quiz) pm.collectionVariables.set('quizId', body.quiz.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"documentId\": \"{{documentId}}\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/quizzes", "host": ["{{baseUrl}}"], "path": ["api", "quizzes"] }
+          }
+        },
+        {
+          "name": "Get quiz",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/api/quizzes/{{quizId}}", "host": ["{{baseUrl}}"], "path": ["api", "quizzes", "{{quizId}}"] }
+          }
+        },
+        {
+          "name": "Delete quiz",
+          "request": {
+            "method": "DELETE",
+            "url": { "raw": "{{baseUrl}}/api/quizzes/{{quizId}}", "host": ["{{baseUrl}}"], "path": ["api", "quizzes", "{{quizId}}"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Backend - Flashcards",
+      "item": [
+        {
+          "name": "List flashcard sets",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/api/flashcards", "host": ["{{baseUrl}}"], "path": ["api", "flashcards"] }
+          }
+        },
+        {
+          "name": "Create flashcard set",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "if (body.set) pm.collectionVariables.set('flashcardSetId', body.set.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"documentId\": \"{{documentId}}\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/flashcards", "host": ["{{baseUrl}}"], "path": ["api", "flashcards"] }
+          }
+        },
+        {
+          "name": "Get flashcard set",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/flashcards/{{flashcardSetId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "flashcards", "{{flashcardSetId}}"]
+            }
+          }
+        },
+        {
+          "name": "Delete flashcard set",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/api/flashcards/{{flashcardSetId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "flashcards", "{{flashcardSetId}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "AI Service",
+      "item": [
+        {
+          "name": "Health",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{aiServiceUrl}}/health", "host": ["{{aiServiceUrl}}"], "path": ["health"] }
+          }
+        },
+        {
+          "name": "Health - ChromaDB",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{aiServiceUrl}}/health/chroma", "host": ["{{aiServiceUrl}}"], "path": ["health", "chroma"] }
+          }
+        },
+        {
+          "name": "RAG query (stub)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"question\": \"What is synaptic plasticity?\"\n}" },
+            "url": { "raw": "{{aiServiceUrl}}/api/rag/query", "host": ["{{aiServiceUrl}}"], "path": ["api", "rag", "query"] }
+          }
+        }
+      ]
+    }
+  ]
+}
