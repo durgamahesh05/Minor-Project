@@ -123,7 +123,7 @@ export default function Sidebar({ c, open, onClose, user, onLogout, children }: 
 
       <div className="px-3 py-3 flex-shrink-0 space-y-0.5" style={{ borderTop: `1px solid ${c.sbBorder}` }}>
         <NavItem c={c} icon={theme === "dark" ? Sun : Moon} label={theme === "dark" ? "Light mode" : "Dark mode"} onClick={toggleTheme} />
-        <NavItem c={c} icon={CreditCard} label="See plans and pricing" to="/pricing" />
+        {user?.role !== "admin" && <NavItem c={c} icon={CreditCard} label="See plans and pricing" to="/pricing" />}
         <NavItem c={c} icon={Settings} label={t("settings")} onClick={() => setSettingsOpen(true)} />
         <NavItem c={c} icon={HelpCircle} label={t("help")} onClick={() => setHelpOpen(true)} />
 

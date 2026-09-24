@@ -3,6 +3,7 @@ import { useNavigate } from "react-router";
 import { FileText, Upload, Trash2, Download, ListChecks, Layers } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { api, ApiError, type Document } from "../lib/api";
+import { beginLocalDocument, chooseDocumentFile, deleteLocalDocument, downloadLocalDocument, listLocalDocuments, markLocalDocumentIndexed } from "../lib/documentStorage";
 import { getThemeColors, JK } from "../lib/theme";
 import { useTheme } from "../context/ThemeContext";
 import Sidebar from "../components/layout/Sidebar";
@@ -30,9 +31,14 @@ export default function DashboardPage() {
   const c = getThemeColors(theme);
 
   useEffect(() => {
-    api
-      .listDocuments()
-      .then(({ documents }) => setDocuments(documents))
+    Promise.all([api.listDocuments(), listLocalDocuments().catch(() => [])])
+      .then(([{ documents }, localDocuments]) => {
+        const localStatus = new Map(localDocuments.map(item => [item.clientDocumentId, item.status]));
+        setDocuments(documents.map(document => ({
+          ...document,
+          status: document.clientDocumentId && localStatus.get(document.clientDocumentId) === "processing" ? "processing" : document.status,
+        })));
+      })
       .finally(() => setLoading(false));
   }, []);
 
@@ -50,10 +56,14 @@ export default function DashboardPage() {
       return;
     }
     setUploading(true);
+    let clientDocumentId: string | undefined;
     try {
-      const { document } = await api.uploadDocument(file);
+      clientDocumentId = await beginLocalDocument(file);
+      const { document } = await api.uploadDocument(file, clientDocumentId);
+      await markLocalDocumentIndexed(document);
       setDocuments(prev => [document, ...prev]);
     } catch (err) {
+      if (clientDocumentId) await deleteLocalDocument(clientDocumentId).catch(() => {});
       setError(err instanceof ApiError ? err.message : "Upload failed");
     } finally {
       setUploading(false);
@@ -61,13 +71,40 @@ export default function DashboardPage() {
     }
   };
 
+  const handleChooseFile = async () => {
+    try {
+      const file = await chooseDocumentFile();
+      if (file) await handleFileChosen(file);
+      else fileInputRef.current?.click();
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === "AbortError")) setError("Unable to open the file picker.");
+    }
+  };
+
   const handleDelete = async (id: string) => {
+    setError(null);
     setBusyDocId(id);
     try {
       await api.deleteDocument(id);
+      const document = documents.find(item => item.id === id);
       setDocuments(prev => prev.filter(d => d.id !== id));
+      await deleteLocalDocument(document?.clientDocumentId).catch(() => {
+        setError("Document deleted, but its browser copy could not be removed.");
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to delete document. Please try again.");
     } finally {
       setBusyDocId(null);
+    }
+  };
+
+  const handleDownload = async (document: Document) => {
+    setError(null);
+    try {
+      if (document.storageProvider === "browser-opfs") await downloadLocalDocument(document);
+      else window.open(api.documentDownloadUrl(document.id), "_blank", "noopener,noreferrer");
+    } catch {
+      setError("The original file is not available in this browser.");
     }
   };
 
@@ -76,6 +113,8 @@ export default function DashboardPage() {
     try {
       const { quiz } = await api.createQuiz(documentId);
       navigate(`/quiz/${quiz.id}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to generate quiz.");
     } finally {
       setBusyDocId(null);
     }
@@ -86,6 +125,8 @@ export default function DashboardPage() {
     try {
       const { set } = await api.createFlashcardSet(documentId);
       navigate(`/flashcards/${set.id}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to generate flashcards.");
     } finally {
       setBusyDocId(null);
     }
@@ -123,7 +164,7 @@ export default function DashboardPage() {
                   onChange={e => handleFileChosen(e.target.files?.[0])}
                 />
                 <button
-                  onClick={() => fileInputRef.current?.click()}
+                  onClick={handleChooseFile}
                   disabled={uploading}
                   className="px-4 py-2 rounded-full text-[13px] font-semibold flex items-center gap-2 transition-opacity hover:opacity-90 disabled:opacity-50"
                   style={{ background: "#7c5af0", color: "#ffffff" }}
@@ -186,16 +227,14 @@ export default function DashboardPage() {
                       >
                         <Layers size={16} strokeWidth={1.5} />
                       </button>
-                      <a
+                      <button
                         title="Download"
-                        href={`${import.meta.env.VITE_API_URL ?? "http://localhost:8000"}/api/documents/${doc.id}/download`}
-                        target="_blank"
-                        rel="noreferrer"
+                        onClick={() => handleDownload(doc)}
                         className="p-2 rounded-lg transition-opacity hover:opacity-70"
                         style={{ color: c.mainSub }}
                       >
                         <Download size={16} strokeWidth={1.5} />
-                      </a>
+                      </button>
                       <button
                         title="Delete"
                         disabled={busyDocId === doc.id}

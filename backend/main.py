@@ -1,23 +1,41 @@
 """Synapse's unified FastAPI backend (API, Mongo persistence, and AI scaffold)."""
-import hashlib, os, re, secrets, shutil, smtplib
+import hashlib, os, re, secrets, smtplib, logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from contextlib import asynccontextmanager
 from email.message import EmailMessage
 import bcrypt
 from bson import ObjectId
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
 from pymongo import DESCENDING, MongoClient
 from starlette.middleware.sessions import SessionMiddleware
+from document_storage import delete_document, signed_download_url
+from ingestion.file_router import SUPPORTED_EXTENSIONS
+from rag.pipeline import delete_document_artifacts, get_rag, close_rag_instances
+from rag.resources import resources as io_resources
 
-load_dotenv(Path(__file__).resolve().parent / ".env"); app=FastAPI(title="Synapse API")
+@asynccontextmanager
+async def lifespan(app):
+ try:
+  yield
+ finally:
+  try:
+   io_resources.close()
+   close_rag_instances()
+  finally:
+   mongo_client.close()
+
+logging.basicConfig(level=logging.INFO)
+load_dotenv(Path(__file__).resolve().parent / ".env"); app=FastAPI(title="Synapse API",lifespan=lifespan)
 app.add_middleware(SessionMiddleware, secret_key=os.getenv("SESSION_SECRET", "replace-in-production"), max_age=604800)
 app.add_middleware(CORSMiddleware, allow_origins=[os.getenv("CLIENT_URL", "http://localhost:5173")], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
-db=MongoClient(os.getenv("MONGODB_URI", "mongodb://localhost:27017"),tz_aware=True).get_database("SynapseAI"); uploads=Path(__file__).parent/"uploads"
-allowed={"application/pdf","application/msword","application/vnd.openxmlformats-officedocument.wordprocessingml.document","application/vnd.ms-powerpoint","application/vnd.openxmlformats-officedocument.presentationml.presentation"}
+mongo_client=MongoClient(os.getenv("MONGODB_URI", "mongodb://localhost:27017"),tz_aware=True,maxPoolSize=50,minPoolSize=0,waitQueueTimeoutMS=10000)
+db=mongo_client.get_database("SynapseAI"); uploads=Path(__file__).parent/"uploads"
+MAX_DOCUMENT_SIZE=20*1024*1024
 fallback="I'm Synapse. I can help you understand your documents, generate flashcards, quiz you, and create summaries."
 class Data(BaseModel):
  name:str|None=None;email:str|None=None;password:str|None=None;confirmPassword:str|None=None;otp:str|None=None;token:str|None=None;title:str|None=None;text:str|None=None;documentId:str|None=None;question:str|None=None;conversation_id:str|None=None
@@ -27,7 +45,7 @@ def oid(v):
  try:return ObjectId(v)
  except:raise HTTPException(404,"Resource not found")
 def view(d,drop=()):
- r={k:v for k,v in d.items() if k not in set(drop)|{"_id","userId","conversationId","passwordHash","otpHash","otpExpiresAt","resetTokenHash","resetTokenExpiresAt","storedFilename","storageProvider","storagePath"}};r["id"]=str(d["_id"])
+ r={k:v for k,v in d.items() if k not in set(drop)|{"_id","userId","conversationId","passwordHash","otpHash","otpExpiresAt","resetTokenHash","resetTokenExpiresAt","storedFilename","storagePath","supabaseMetadataId","extractedText","chunks"}};r["id"]=str(d["_id"])
  for k,v in r.items():
   if isinstance(v,(ObjectId,datetime)):r[k]=str(v) if isinstance(v,ObjectId) else v.isoformat()
  return r
@@ -35,11 +53,23 @@ def user(request:Request):
  x=db.users.find_one({"_id":oid(request.session["userId"])}) if request.session.get("userId") else None
  if not x:raise HTTPException(401,"Not authenticated")
  return x
+def admin(u=Depends(user)):
+ if u.get("role","user")!="admin":raise HTTPException(403,"Admin access required")
+ return u
 def public(x):return {"id":str(x["_id"]),"name":x["name"],"email":x["email"],"role":x.get("role","user")}
 def owned(collection,ident,u):
  x=db[collection].find_one({"_id":oid(ident),"userId":u["_id"]})
  if not x:raise HTTPException(404,"Resource not found")
  return x
+
+def chat_document(document_id,u):
+ if document_id:
+  document=owned("documents",document_id,u)
+  if document.get("status")!="indexed":raise HTTPException(409,"This document is not ready for questions. Wait for indexing to finish, or upload it again if processing failed.")
+  return document["_id"]
+ if db.documents.find_one({"userId":u["_id"],"status":{"$in":["uploading","processing"]}}):
+  raise HTTPException(409,"A document is still being indexed. Please wait before sending your question.")
+ return None
 def password_ok(p):return bool(p and len(p)>=7 and any(x.isupper() for x in p) and any(x.islower() for x in p) and any(x.isdigit() for x in p) and any(not x.isalnum() for x in p))
 def send_email(recipient, subject, text):
  host=os.getenv("SMTP_HOST"); username=os.getenv("SMTP_USERNAME"); password=os.getenv("SMTP_PASSWORD")
@@ -71,7 +101,11 @@ def chroma_health():
   return {"status":"ok","collections":[x.name for x in chromadb.CloudClient(api_key=k,tenant=t,database=d).list_collections()]}
  except ImportError: return {"status":"not installed","message":"Install the optional AI-service requirements with Python 3.10."}
 @app.post("/api/rag/query")
-def rag(body:Data):return {"answer":fallback,"sources":[]}
+def rag(body:Data,u=Depends(user)):
+ if not body.question or not body.question.strip():raise HTTPException(400,"Question is required")
+ document_id=chat_document(body.documentId,u)
+ try:result=get_rag(db).answer(body.question.strip(),u["_id"],document_id=document_id);return {"answer":result.answer,"sources":result.sources}
+ except Exception as error:raise HTTPException(502,f"RAG query failed: {error}") from error
 
 @app.post("/api/auth/register")
 def register(b:Data):
@@ -172,7 +206,9 @@ def confirm_account_deletion(b:Data,request:Request,u=Depends(user)):
  if conversation_ids:db.messages.delete_many({"conversationId":{"$in":conversation_ids}})
  db.conversations.delete_many({"userId":u["_id"]})
  for document in db.documents.find({"userId":u["_id"]}):
-  if document.get("storedFilename"):(uploads/document["storedFilename"]).unlink(missing_ok=True)
+  delete_document_artifacts(db,document["_id"])
+  if document.get("storageProvider")=="supabase":delete_document(document.get("storagePath"),document.get("supabaseMetadataId"))
+  elif document.get("storageProvider")=="local" and document.get("storedFilename"):(uploads/document["storedFilename"]).unlink(missing_ok=True)
  db.documents.delete_many({"userId":u["_id"]});db.quizzes.delete_many({"userId":u["_id"]});db.flashcardsets.delete_many({"userId":u["_id"]})
  db.accountdeletions.insert_one({"email":u["email"],"deletedAt":now()});db.users.delete_one({"_id":u["_id"]});request.session.clear()
 
@@ -187,7 +223,12 @@ def messages(ident:str,u=Depends(user)):
 @app.post("/api/chat/conversations/{ident}/messages",status_code=201)
 def message(ident:str,b:Data,u=Depends(user)):
  if not b.text or not b.text.strip():raise HTTPException(400,"Message text is required")
- c=owned("conversations",ident,u);a={"conversationId":c["_id"],"role":"user","text":b.text.strip(),"createdAt":now()};a["_id"]=db.messages.insert_one(a).inserted_id;z={"conversationId":c["_id"],"role":"assistant","text":fallback,"createdAt":now()};z["_id"]=db.messages.insert_one(z).inserted_id;db.conversations.update_one({"_id":c["_id"]},{"$set":{"updatedAt":now()}});return {"userMessage":view(a),"assistantMessage":view(z)}
+ c=owned("conversations",ident,u)
+ document_id=chat_document(b.documentId,u)
+ try:reply=get_rag(db).chat(b.text.strip(),u["_id"],document_id=document_id).answer
+ except Exception as error:raise HTTPException(502,f"Unable to answer your message: {error}") from error
+ a={"conversationId":c["_id"],"role":"user","text":b.text.strip(),"createdAt":now()};a["_id"]=db.messages.insert_one(a).inserted_id
+ z={"conversationId":c["_id"],"role":"assistant","text":reply,"createdAt":now()};z["_id"]=db.messages.insert_one(z).inserted_id;db.conversations.update_one({"_id":c["_id"]},{"$set":{"updatedAt":now()}});return {"userMessage":view(a),"assistantMessage":view(z)}
 @app.delete("/api/chat/conversations/{ident}",status_code=204)
 def remove_chat(ident:str,u=Depends(user)):
  c=owned("conversations",ident,u);db.messages.delete_many({"conversationId":c["_id"]});db.conversations.delete_one({"_id":c["_id"]})
@@ -195,18 +236,94 @@ def remove_chat(ident:str,u=Depends(user)):
 @app.get("/api/documents")
 def documents(u=Depends(user)):return {"documents":[view(x) for x in db.documents.find({"userId":u["_id"]}).sort("createdAt",DESCENDING)]}
 @app.post("/api/documents",status_code=201)
-def upload(file:UploadFile=File(...),u=Depends(user)):
- if file.content_type not in allowed:raise HTTPException(400,"Only PDF, DOC, DOCX, PPT and PPTX files are allowed")
- uploads.mkdir(exist_ok=True);name=secrets.token_hex(16)+Path(file.filename or '').suffix;path=uploads/name
- with path.open("wb") as f:shutil.copyfileobj(file.file,f)
- if path.stat().st_size>20*1024*1024:path.unlink();raise HTTPException(400,"File too large (20MB maximum)")
- x={"userId":u["_id"],"originalName":file.filename,"storedFilename":name,"storageProvider":"local","mimeType":file.content_type,"size":path.stat().st_size,"createdAt":now(),"updatedAt":now()};x["_id"]=db.documents.insert_one(x).inserted_id;return {"document":view(x)}
+def upload(file:UploadFile=File(...),client_document_id:str=Form(...),u=Depends(user)):
+ original=file.filename or "upload";extension=Path(original).suffix.lower()
+ if extension not in SUPPORTED_EXTENSIONS:raise HTTPException(400,"Supported files: TXT, PDF, DOCX, PPTX, and common images")
+ if not re.fullmatch(r"[0-9a-fA-F-]{36}",client_document_id):raise HTTPException(400,"Invalid browser document ID")
+ content=file.file.read(MAX_DOCUMENT_SIZE+1)
+ if len(content)>MAX_DOCUMENT_SIZE:raise HTTPException(400,"File too large (20MB maximum)")
+ x=None
+ logging.getLogger(__name__).info("Upload received: %s (%d bytes)",original,len(content))
+ try:
+  x={"userId":u["_id"],"clientDocumentId":client_document_id,"originalName":original,"storageProvider":"browser-opfs","mimeType":file.content_type or "application/octet-stream","size":len(content),"status":"processing","createdAt":now(),"updatedAt":now()};x["_id"]=db.documents.insert_one(x).inserted_id
+  element_count=get_rag(db).ingest(original,content,u["_id"],x["_id"])
+  db.documents.update_one({"_id":x["_id"]},{"$set":{"status":"indexed","elementCount":element_count,"updatedAt":now()}});x["status"]="indexed";x["elementCount"]=element_count
+  return {"document":view(x)}
+ except Exception as error:
+  logging.getLogger(__name__).exception("Document processing failed: %s",original)
+  if x:
+   delete_document_artifacts(db,x["_id"]);db.documents.delete_one({"_id":x["_id"]})
+  raise HTTPException(502,f"Document processing failed: {error}") from error
 @app.get("/api/documents/{ident}/download")
 def download(ident:str,u=Depends(user)):
- x=owned("documents",ident,u);return FileResponse(uploads/x["storedFilename"],filename=x["originalName"],media_type=x["mimeType"])
+ x=owned("documents",ident,u)
+ if x.get("storageProvider")=="browser-opfs":raise HTTPException(409,"This file is stored in this browser's private storage")
+ if x.get("storageProvider")=="supabase":return RedirectResponse(signed_download_url(x["storagePath"],x["originalName"]))
+ if x.get("storageProvider")=="local" and x.get("storedFilename"):return FileResponse(uploads/x["storedFilename"],filename=x["originalName"],media_type=x["mimeType"])
+ raise HTTPException(404,"The original file is no longer available")
 @app.delete("/api/documents/{ident}",status_code=204)
 def delete_doc(ident:str,u=Depends(user)):
- x=owned("documents",ident,u);(uploads/x["storedFilename"]).unlink(missing_ok=True);db.documents.delete_one({"_id":x["_id"]})
+ x=owned("documents",ident,u)
+ if x.get("storageProvider")=="supabase":delete_document(x.get("storagePath"),x.get("supabaseMetadataId"))
+ elif x.get("storageProvider")=="local" and x.get("storedFilename"):(uploads/x["storedFilename"]).unlink(missing_ok=True)
+ delete_document_artifacts(db,x["_id"]);db.documents.delete_one({"_id":x["_id"]})
+
+def owner_value(document):
+ owner=db.users.find_one({"_id":document.get("userId")},{"name":1,"email":1})
+ return {"id":str(owner["_id"]),"name":owner.get("name",""),"email":owner.get("email","")} if owner else None
+
+@app.get("/api/admin/stats")
+def admin_stats(_=Depends(admin)):
+ return {"totalUsers":db.users.count_documents({}),"totalDocuments":db.documents.count_documents({}),"totalQuizzes":db.quizzes.count_documents({}),"totalFlashcardSets":db.flashcardsets.count_documents({}),"totalConversations":db.conversations.count_documents({})}
+
+@app.get("/api/admin/users")
+def admin_users(_=Depends(admin)):
+ return {"users":[{"id":str(x["_id"]),"name":x.get("name",""),"email":x.get("email",""),"role":x.get("role","user"),"createdAt":x.get("createdAt",now()).isoformat()} for x in db.users.find().sort("createdAt",DESCENDING)]}
+
+@app.delete("/api/admin/users/{ident}",status_code=204)
+def admin_delete_user(ident:str,request:Request,_=Depends(admin)):
+ target=oid(ident)
+ if request.session.get("userId")==ident:raise HTTPException(400,"You can't delete your own account while logged in")
+ victim=db.users.find_one({"_id":target})
+ if not victim:raise HTTPException(404,"User not found")
+ conversation_ids=[x["_id"] for x in db.conversations.find({"userId":target},{"_id":1})]
+ if conversation_ids:db.messages.delete_many({"conversationId":{"$in":conversation_ids}})
+ db.conversations.delete_many({"userId":target})
+ for document in db.documents.find({"userId":target}):
+  delete_document_artifacts(db,document["_id"])
+  if document.get("storageProvider")=="supabase":delete_document(document.get("storagePath"),document.get("supabaseMetadataId"))
+  elif document.get("storageProvider")=="local" and document.get("storedFilename"):(uploads/document["storedFilename"]).unlink(missing_ok=True)
+ db.documents.delete_many({"userId":target});db.quizzes.delete_many({"userId":target});db.flashcardsets.delete_many({"userId":target});db.users.delete_one({"_id":target})
+
+@app.get("/api/admin/documents")
+def admin_documents(_=Depends(admin)):
+ return {"documents":[{"id":str(x["_id"]),"originalName":x.get("originalName",""),"mimeType":x.get("mimeType",""),"size":x.get("size",0),"createdAt":x.get("createdAt",now()).isoformat(),"owner":owner_value(x)} for x in db.documents.find().sort("createdAt",DESCENDING)]}
+
+@app.delete("/api/admin/documents/{ident}",status_code=204)
+def admin_delete_document(ident:str,_=Depends(admin)):
+ x=db.documents.find_one({"_id":oid(ident)})
+ if not x:raise HTTPException(404,"Document not found")
+ if x.get("storageProvider")=="supabase":delete_document(x.get("storagePath"),x.get("supabaseMetadataId"))
+ elif x.get("storageProvider")=="local" and x.get("storedFilename"):(uploads/x["storedFilename"]).unlink(missing_ok=True)
+ delete_document_artifacts(db,x["_id"]);db.documents.delete_one({"_id":x["_id"]})
+
+@app.get("/api/admin/quizzes")
+def admin_quizzes(_=Depends(admin)):
+ return {"quizzes":[{"id":str(x["_id"]),"title":x.get("title",""),"questionCount":len(x.get("questions",[])),"createdAt":x.get("createdAt",now()).isoformat(),"owner":owner_value(x)} for x in db.quizzes.find().sort("createdAt",DESCENDING)]}
+
+@app.delete("/api/admin/quizzes/{ident}",status_code=204)
+def admin_delete_quiz(ident:str,_=Depends(admin)):
+ result=db.quizzes.delete_one({"_id":oid(ident)})
+ if not result.deleted_count:raise HTTPException(404,"Quiz not found")
+
+@app.get("/api/admin/flashcards")
+def admin_flashcards(_=Depends(admin)):
+ return {"sets":[{"id":str(x["_id"]),"title":x.get("title",""),"cardCount":len(x.get("cards",[])),"createdAt":x.get("createdAt",now()).isoformat(),"owner":owner_value(x)} for x in db.flashcardsets.find().sort("createdAt",DESCENDING)]}
+
+@app.delete("/api/admin/flashcards/{ident}",status_code=204)
+def admin_delete_flashcards(ident:str,_=Depends(admin)):
+ result=db.flashcardsets.delete_one({"_id":oid(ident)})
+ if not result.deleted_count:raise HTTPException(404,"Flashcard set not found")
 
 def resources(collection,plural,single,field,prefix):
  def listing(u=Depends(user)):return {plural:[view(x,{field}) for x in db[collection].find({"userId":u["_id"]}).sort("createdAt",DESCENDING)]}

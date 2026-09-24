@@ -38,6 +38,8 @@ export default function AdminPage() {
     api.adminStats().then(setStats);
   }, []);
 
+  const refreshStats = () => api.adminStats().then(setStats);
+
   useEffect(() => {
     setLoading(true);
     const load =
@@ -62,7 +64,7 @@ export default function AdminPage() {
     try {
       await api.adminDeleteUser(id);
       setUsers(prev => prev.filter(u => u.id !== id));
-      setStats(prev => (prev ? { ...prev, totalUsers: prev.totalUsers - 1 } : prev));
+      await refreshStats();
     } finally {
       setBusyId(null);
     }
@@ -73,6 +75,7 @@ export default function AdminPage() {
     try {
       await api.adminDeleteDocument(id);
       setDocuments(prev => prev.filter(d => d.id !== id));
+      await refreshStats();
     } finally {
       setBusyId(null);
     }
@@ -83,6 +86,7 @@ export default function AdminPage() {
     try {
       await api.adminDeleteQuiz(id);
       setQuizzes(prev => prev.filter(q => q.id !== id));
+      await refreshStats();
     } finally {
       setBusyId(null);
     }
@@ -93,6 +97,7 @@ export default function AdminPage() {
     try {
       await api.adminDeleteFlashcardSet(id);
       setFlashcardSets(prev => prev.filter(s => s.id !== id));
+      await refreshStats();
     } finally {
       setBusyId(null);
     }

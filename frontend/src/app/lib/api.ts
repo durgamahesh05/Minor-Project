@@ -21,6 +21,8 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     throw new ApiError(0, `Cannot connect to the API at ${API_URL}. Make sure the backend is running.`);
   }
 
+  // FastAPI returns an empty body for successful DELETE requests.
+  if (res.status === 204) return undefined as T;
   const isJson = res.headers.get("content-type")?.includes("application/json");
   const body = isJson ? await res.json() : undefined;
 
@@ -35,10 +37,12 @@ export type Conversation = { id: string; title: string; updatedAt: string };
 export type Message = { id: string; role: "user" | "assistant"; text: string; createdAt: string };
 export type Document = {
   id: string;
+  clientDocumentId?: string;
+  storageProvider?: "browser-opfs" | "supabase" | "local";
   originalName: string;
   mimeType: string;
   size: number;
-  status: "uploading" | "processing" | "ready" | "failed";
+  status: "uploading" | "processing" | "ready" | "indexed" | "failed";
   createdAt: string;
 };
 export type QuizQuestion = { question: string; options: string[]; correctIndex: number };
@@ -115,16 +119,17 @@ export const api = {
     request<void>(`/api/chat/conversations/${id}`, { method: "DELETE" }),
   getMessages: (conversationId: string) =>
     request<{ messages: Message[] }>(`/api/chat/conversations/${conversationId}/messages`),
-  sendMessage: (conversationId: string, text: string, language = "auto") =>
+  sendMessage: (conversationId: string, text: string, language = "auto", documentId?: string) =>
     request<{ userMessage: Message; assistantMessage: Message }>(
       `/api/chat/conversations/${conversationId}/messages`,
-      { method: "POST", body: JSON.stringify({ text, language }) },
+      { method: "POST", body: JSON.stringify({ text, language, documentId }) },
     ),
 
   listDocuments: () => request<{ documents: Document[] }>("/api/documents"),
-  uploadDocument: (file: File) => {
+  uploadDocument: (file: File, clientDocumentId: string) => {
     const formData = new FormData();
     formData.append("file", file);
+    formData.append("client_document_id", clientDocumentId);
     return request<{ document: Document }>("/api/documents", { method: "POST", body: formData });
   },
   documentDownloadUrl: (id: string) => `${API_URL}/api/documents/${id}/download`,

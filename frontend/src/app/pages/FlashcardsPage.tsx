@@ -17,6 +17,8 @@ export default function FlashcardsPage() {
   const [sets, setSets] = useState<FlashcardSetSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const c = getThemeColors(theme);
 
@@ -33,18 +35,29 @@ export default function FlashcardsPage() {
   };
 
   const handleCreate = async () => {
+    setError(null);
     setCreating(true);
     try {
       const { set } = await api.createFlashcardSet();
       navigate(`/flashcards/${set.id}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to generate flashcard set.");
     } finally {
       setCreating(false);
     }
   };
 
   const handleDelete = async (id: string) => {
-    await api.deleteFlashcardSet(id);
-    setSets(prev => prev.filter(s => s.id !== id));
+    setError(null);
+    setDeletingId(id);
+    try {
+      await api.deleteFlashcardSet(id);
+      setSets(prev => prev.filter(s => s.id !== id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to delete flashcard set. Please try again.");
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   return (
@@ -82,6 +95,8 @@ export default function FlashcardsPage() {
               </button>
             </div>
 
+            {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+
             {loading ? (
               <p className="text-sm" style={{ color: c.mainSub }}>
                 Loading…
@@ -113,6 +128,7 @@ export default function FlashcardsPage() {
                     </div>
                     <button
                       title="Delete"
+                      disabled={deletingId !== null}
                       onClick={e => {
                         e.stopPropagation();
                         handleDelete(set.id);

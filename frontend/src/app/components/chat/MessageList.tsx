@@ -1,5 +1,9 @@
-import { useEffect, useRef } from "react";
 import { Brain } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import rehypeKatex from "rehype-katex";
+import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import "katex/dist/katex.min.css";
 import type { ThemeColors } from "../../lib/theme";
 import type { Message } from "../../lib/api";
 import { useTranslation } from "react-i18next";
@@ -12,14 +16,9 @@ type Props = {
 
 export default function MessageList({ c, messages, isTyping }: Props) {
   const { t } = useTranslation();
-  const bottomRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, isTyping]);
 
   return (
-    <div className="max-w-[720px] mx-auto px-6 py-8 space-y-6">
+    <div className="w-full max-w-[768px] mx-auto px-4 sm:px-6 py-6 space-y-6">
       {messages.map(m => (
         <div key={m.id} className={`flex gap-3 ${m.role === "user" ? "flex-row-reverse" : "flex-row"}`}>
           {m.role === "assistant" && (
@@ -28,8 +27,8 @@ export default function MessageList({ c, messages, isTyping }: Props) {
             </div>
           )}
           <div
-            className={`max-w-[82%] text-[14px] leading-[1.7] ${
-              m.role === "user" ? "px-4 py-3 rounded-2xl rounded-tr-md" : "py-1"
+            className={`min-w-0 break-words text-[14px] leading-[1.7] ${
+              m.role === "user" ? "max-w-[85%] px-4 py-3 rounded-2xl rounded-tr-md" : "flex-1 py-1"
             }`}
             style={{
               background: m.role === "user" ? c.userBubble : "transparent",
@@ -37,7 +36,18 @@ export default function MessageList({ c, messages, isTyping }: Props) {
               color: c.mainFg,
             }}
           >
-            {m.text}
+            {m.role === "assistant" ? (
+              <div className="message-markdown">
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm, remarkMath]}
+                  rehypePlugins={[rehypeKatex]}
+                >
+                  {m.text}
+                </ReactMarkdown>
+              </div>
+            ) : (
+              <div className="whitespace-pre-wrap break-words">{m.text}</div>
+            )}
           </div>
         </div>
       ))}
@@ -48,7 +58,8 @@ export default function MessageList({ c, messages, isTyping }: Props) {
           <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5" style={{ background: "#7c5af0" }}>
             <Brain size={14} strokeWidth={2} className="text-white" />
           </div>
-          <div className="flex items-center gap-1.5 py-3">
+          <div role="status" className="flex items-center gap-1.5 py-3">
+            <span className="mr-2 text-xs" style={{ color: c.mainSub }}>Preparing your answer</span>
             {[0, 1, 2].map(j => (
               <span
                 key={j}
@@ -60,7 +71,6 @@ export default function MessageList({ c, messages, isTyping }: Props) {
         </div>
       )}
 
-      <div ref={bottomRef} />
     </div>
   );
 }

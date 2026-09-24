@@ -8,6 +8,7 @@ import { useTheme, type ThemeMode } from "../context/ThemeContext";
 import { api, ApiError } from "../lib/api";
 import { languages } from "../i18n";
 import { useLanguage } from "../context/LanguageContext";
+import { clearAllLocalDocuments } from "../lib/documentStorage";
 
 type DeleteStep = "idle" | "confirm" | "otp" | "deleting" | "done";
 
@@ -35,6 +36,7 @@ export default function SettingsDialog({ open, onOpenChange }: { open: boolean; 
     setDeleteStep("deleting");
     try {
       await api.confirmAccountDeletion(otpInput);
+      await clearAllLocalDocuments();
       setDeleteStep("done");
       window.location.href = "/";
     } catch (err) {

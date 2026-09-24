@@ -4,6 +4,7 @@ dist/
 .env.*
 !.env.example
 backend/uploads/
+backend/qdrant_data/
 *.log
 npm-debug.log*
 

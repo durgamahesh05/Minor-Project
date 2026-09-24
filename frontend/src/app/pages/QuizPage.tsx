@@ -17,6 +17,8 @@ export default function QuizPage() {
   const [quizzes, setQuizzes] = useState<QuizSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const c = getThemeColors(theme);
 
@@ -33,18 +35,29 @@ export default function QuizPage() {
   };
 
   const handleCreate = async () => {
+    setError(null);
     setCreating(true);
     try {
       const { quiz } = await api.createQuiz();
       navigate(`/quiz/${quiz.id}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to generate quiz.");
     } finally {
       setCreating(false);
     }
   };
 
   const handleDelete = async (id: string) => {
-    await api.deleteQuiz(id);
-    setQuizzes(prev => prev.filter(q => q.id !== id));
+    setError(null);
+    setDeletingId(id);
+    try {
+      await api.deleteQuiz(id);
+      setQuizzes(prev => prev.filter(q => q.id !== id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to delete quiz. Please try again.");
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   return (
@@ -83,6 +96,8 @@ export default function QuizPage() {
               </button>
             </div>
 
+            {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+
             {loading ? (
               <p className="text-sm" style={{ color: c.mainSub }}>
                 Loading…
@@ -114,6 +129,7 @@ export default function QuizPage() {
                     </div>
                     <button
                       title="Delete"
+                      disabled={deletingId !== null}
                       onClick={e => {
                         e.stopPropagation();
                         handleDelete(quiz.id);
