@@ -14,8 +14,9 @@ export default function QuizDetailPage() {
   const navigate = useNavigate();
 
   const { theme } = useTheme();
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(() => window.matchMedia("(min-width: 768px)").matches);
   const [quiz, setQuiz] = useState<Quiz | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [answers, setAnswers] = useState<Record<number, number>>({});
   const [submitted, setSubmitted] = useState(false);
@@ -25,11 +26,13 @@ export default function QuizDetailPage() {
   useEffect(() => {
     if (!id) return;
     setLoading(true);
+    setError(null);
     setAnswers({});
     setSubmitted(false);
     api
       .getQuiz(id)
       .then(({ quiz }) => setQuiz(quiz))
+      .catch(error => setError(error instanceof Error ? error.message : "Unable to load study materials."))
       .finally(() => setLoading(false));
   }, [id]);
 
@@ -41,7 +44,7 @@ export default function QuizDetailPage() {
   const score = quiz ? quiz.questions.filter((q, i) => answers[i] === q.correctIndex).length : 0;
 
   return (
-    <div className="flex h-screen overflow-hidden" style={{ background: c.main, fontFamily: "'Inter', sans-serif" }}>
+    <div className="flex h-dvh min-h-0 overflow-hidden" style={{ background: c.main, fontFamily: "'Inter', sans-serif" }}>
       <Sidebar
         c={c}
         open={sidebarOpen}
@@ -53,14 +56,14 @@ export default function QuizDetailPage() {
       <div className="flex-1 flex flex-col min-w-0">
         <Header c={c} sidebarOpen={sidebarOpen} onOpenSidebar={() => setSidebarOpen(true)} user={user} />
 
-        <div className="flex-1 overflow-y-auto px-6 py-8">
+        <div role="main" className="flex-1 min-w-0 overflow-y-auto px-4 sm:px-6 py-8">
           <div className="max-w-[680px] mx-auto space-y-6">
             <Link to="/quiz" className="text-[13px] flex items-center gap-1.5" style={{ color: c.mainSub }}>
               <ArrowLeft size={14} strokeWidth={2} />
               All quizzes
             </Link>
 
-            {loading || !quiz ? (
+            {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : loading || !quiz ? (
               <p className="text-sm" style={{ color: c.mainSub }}>
                 Loading…
               </p>
@@ -94,6 +97,7 @@ export default function QuizDetailPage() {
                             return (
                               <button
                                 key={oi}
+                                aria-pressed={isSelected}
                                 disabled={submitted}
                                 onClick={() => setAnswers(prev => ({ ...prev, [qi]: oi }))}
                                 className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-left text-[13px] transition-colors disabled:cursor-default"
@@ -110,11 +114,13 @@ export default function QuizDetailPage() {
                             );
                           })}
                         </div>
+                        {submitted && q.explanation && <p className="mt-3 text-sm" style={{ color: c.mainFg }}>{q.explanation}</p>}
                       </div>
                     );
                   })}
                 </div>
 
+                {submitted && <button onClick={() => { setAnswers({}); setSubmitted(false); }} className="rounded-full border px-5 py-2 text-sm" style={{ color: c.mainFg, borderColor: c.chipBorder }}>Try again</button>}
                 {!submitted && (
                   <button
                     onClick={() => setSubmitted(true)}

@@ -1,40 +1,15 @@
+import { HttpClient } from "./HttpClient";
+export { ApiError } from "./HttpClient";
+
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
-export class ApiError extends Error {
-  status: number;
-  constructor(status: number, message: string) {
-    super(message);
-    this.status = status;
-  }
-}
+const client = new HttpClient(API_URL);
+const request = client.request.bind(client);
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const isFormData = options.body instanceof FormData;
-  let res: Response;
-  try {
-    res = await fetch(`${API_URL}${path}`, {
-      credentials: "include",
-      headers: { ...(isFormData ? {} : { "Content-Type": "application/json" }), ...(options.headers ?? {}) },
-      ...options,
-    });
-  } catch {
-    throw new ApiError(0, `Cannot connect to the API at ${API_URL}. Make sure the backend is running.`);
-  }
-
-  // FastAPI returns an empty body for successful DELETE requests.
-  if (res.status === 204) return undefined as T;
-  const isJson = res.headers.get("content-type")?.includes("application/json");
-  const body = isJson ? await res.json() : undefined;
-
-  if (!res.ok) {
-    throw new ApiError(res.status, body?.message ?? body?.detail ?? res.statusText);
-  }
-  return body as T;
-}
-
+export type ResponseLevel = "auto" | "simple" | "detailed" | "deep";
 export type User = { id: string; name: string; email: string; role: "user" | "admin" };
 export type Conversation = { id: string; title: string; updatedAt: string };
-export type Message = { id: string; role: "user" | "assistant"; text: string; createdAt: string };
+export type Message = { id: string; role: "user" | "assistant"; text: string; createdAt: string; attachment?: DocumentAttachment; attachments?: DocumentAttachment[]; studyActions?: { id?: string; title?: string; kind: "quiz" | "flashcards"; prompt: string; documentId: string | null }[] };
 export type Document = {
   id: string;
   clientDocumentId?: string;
@@ -45,12 +20,13 @@ export type Document = {
   status: "uploading" | "processing" | "ready" | "indexed" | "failed";
   createdAt: string;
 };
-export type QuizQuestion = { question: string; options: string[]; correctIndex: number };
+export type DocumentAttachment = Pick<Document, "id" | "originalName" | "mimeType" | "size" | "clientDocumentId" | "storageProvider">;
+export type QuizQuestion = { question: string; options: string[]; correctIndex: number; explanation?: string };
 export type Quiz = { id: string; title: string; documentId: string | null; questions: QuizQuestion[]; createdAt: string };
-export type QuizSummary = Omit<Quiz, "questions">;
+export type QuizSummary = Omit<Quiz, "questions"> & { itemCount?: number };
 export type Flashcard = { front: string; back: string };
 export type FlashcardSet = { id: string; title: string; documentId: string | null; cards: Flashcard[]; createdAt: string };
-export type FlashcardSetSummary = Omit<FlashcardSet, "cards">;
+export type FlashcardSetSummary = Omit<FlashcardSet, "cards"> & { itemCount?: number };
 
 export type AdminStats = {
   totalUsers: number;
@@ -65,8 +41,12 @@ export type AdminDocument = { id: string; originalName: string; mimeType: string
 export type AdminQuiz = { id: string; title: string; questionCount: number; createdAt: string; owner: Owner };
 export type AdminFlashcardSet = { id: string; title: string; cardCount: number; createdAt: string; owner: Owner };
 
+export type StudyOptions = { title?: string; prompt?: string; sourceMode?: string };
+
 export const api = {
-  me: () => request<{ user: User }>("/api/auth/me"),
+  renameStudyMaterial: (kind: "quiz" | "flashcards", id: string, title: string) =>
+    request(`/api/${kind === "quiz" ? "quizzes" : "flashcards"}/${id}`, { method: "PATCH", body: JSON.stringify({ title }) }),
+  me: () => request<{ user: User }>("/api/auth/me", { signal: AbortSignal.timeout(10000), cache: "no-store" }),
   register: (name: string, email: string, password: string) =>
     request<{ message: string; email: string; otp?: string }>("/api/auth/register", {
       method: "POST",
@@ -117,19 +97,24 @@ export const api = {
     }),
   deleteConversation: (id: string) =>
     request<void>(`/api/chat/conversations/${id}`, { method: "DELETE" }),
+  renameConversation: (id: string, title: string) =>
+    request<{ conversation: Conversation }>(`/api/chat/conversations/${id}`, {
+      method: "PATCH", body: JSON.stringify({ title }),
+    }),
   getMessages: (conversationId: string) =>
     request<{ messages: Message[] }>(`/api/chat/conversations/${conversationId}/messages`),
-  sendMessage: (conversationId: string, text: string, language = "auto", documentId?: string) =>
+  sendMessage: (conversationId: string, text: string, language = "auto", documentId?: string, responseLevel: ResponseLevel = "simple", documentIds?: string[]) =>
     request<{ userMessage: Message; assistantMessage: Message }>(
       `/api/chat/conversations/${conversationId}/messages`,
-      { method: "POST", body: JSON.stringify({ text, language, documentId }) },
+      { method: "POST", body: JSON.stringify({ text, language, documentId, documentIds, responseLevel }) },
     ),
 
   listDocuments: () => request<{ documents: Document[] }>("/api/documents"),
-  uploadDocument: (file: File, clientDocumentId: string) => {
+  uploadDocument: (file: File, clientDocumentId: string, onProgress?: (percent: number) => void) => {
     const formData = new FormData();
     formData.append("file", file);
     formData.append("client_document_id", clientDocumentId);
+    if (onProgress) return client.upload<{ document: Document }>("/api/documents", formData, onProgress);
     return request<{ document: Document }>("/api/documents", { method: "POST", body: formData });
   },
   documentDownloadUrl: (id: string) => `${API_URL}/api/documents/${id}/download`,
@@ -137,14 +122,14 @@ export const api = {
 
   listQuizzes: () => request<{ quizzes: QuizSummary[] }>("/api/quizzes"),
   getQuiz: (id: string) => request<{ quiz: Quiz }>(`/api/quizzes/${id}`),
-  createQuiz: (documentId?: string) =>
-    request<{ quiz: Quiz }>("/api/quizzes", { method: "POST", body: JSON.stringify({ documentId }) }),
+  createQuiz: (documentId?: string, options: StudyOptions = {}) =>
+    request<{ quiz: Quiz }>("/api/quizzes", { method: "POST", body: JSON.stringify({ documentId, ...options }) }),
   deleteQuiz: (id: string) => request<void>(`/api/quizzes/${id}`, { method: "DELETE" }),
 
   listFlashcardSets: () => request<{ sets: FlashcardSetSummary[] }>("/api/flashcards"),
   getFlashcardSet: (id: string) => request<{ set: FlashcardSet }>(`/api/flashcards/${id}`),
-  createFlashcardSet: (documentId?: string) =>
-    request<{ set: FlashcardSet }>("/api/flashcards", { method: "POST", body: JSON.stringify({ documentId }) }),
+  createFlashcardSet: (documentId?: string, options: StudyOptions = {}) =>
+    request<{ set: FlashcardSet }>("/api/flashcards", { method: "POST", body: JSON.stringify({ documentId, ...options }) }),
   deleteFlashcardSet: (id: string) => request<void>(`/api/flashcards/${id}`, { method: "DELETE" }),
 
   adminStats: () => request<AdminStats>("/api/admin/stats"),

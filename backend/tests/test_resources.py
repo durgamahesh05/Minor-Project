@@ -107,6 +107,7 @@ def test_vector_store_initialization_is_lazy_and_thread_safe(monkeypatch):
     rag.embedder = Mock()
     rag.embedder.embed_query.return_value = [0.1, 0.2]
     factory = Mock()
+    monkeypatch.setenv("VECTOR_STORE", "qdrant")
     monkeypatch.setattr(pipeline, "QdrantVectorStore", factory)
     factory.assert_not_called()
     with ThreadPoolExecutor(max_workers=4) as pool:
@@ -135,3 +136,23 @@ def test_parallel_image_summaries_stay_linked_to_original_elements(monkeypatch):
     rag.embedder.embed.assert_called_once_with(["summary-a", "notes", "summary-b"])
     records = rag.vectorstore.upsert.call_args.args[0]
     assert [(record["id"], record["vector"]) for record in records] == [("image-a", [1]), ("text", [2]), ("image-b", [3])]
+
+
+def test_repeated_images_only_call_vision_and_embeddings_once(monkeypatch):
+    from bson import ObjectId
+    from ingestion.multimodal import ContentElement
+    from rag import pipeline
+
+    rag = pipeline.MultimodalRAG.__new__(pipeline.MultimodalRAG)
+    rag.database, rag.vectorstore, rag.embedder = Mock(), Mock(), Mock()
+    elements = [ContentElement("a", "image", "same-image", {"page": 1}),
+                ContentElement("b", "image", "same-image", {"page": 2})]
+    monkeypatch.setattr(pipeline, "extract_elements", lambda *args: elements)
+    rag._summary = Mock(return_value="A repeated diagram")
+    rag.embedder.embed.return_value = [[1, 0]]
+    assert rag.ingest("notes.pdf", b"fake", ObjectId(), ObjectId()) == 2
+    rag._summary.assert_called_once()
+    rag.embedder.embed.assert_called_once_with(["A repeated diagram"])
+    records = rag.vectorstore.upsert.call_args.args[0]
+    assert [r["id"] for r in records] == ["a", "b"]
+    assert [r["vector"] for r in records] == [[1, 0], [1, 0]]

@@ -15,6 +15,7 @@ import {
   Moon,
   LogOut,
   ShieldCheck,
+  ChevronsUpDown,
 } from "lucide-react";
 import type { ThemeColors } from "../../lib/theme";
 import { JK } from "../../lib/theme";
@@ -23,6 +24,7 @@ import { useTranslation } from "react-i18next";
 import type { User } from "../../lib/api";
 import SettingsDialog from "../SettingsDialog";
 import HelpDialog from "../HelpDialog";
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from "../ui/dropdown-menu";
 
 export type NavItemProps = {
   c: ThemeColors;
@@ -88,8 +90,9 @@ export default function Sidebar({ c, open, onClose, user, onLogout, children }: 
 
   return (
     <aside
-      className="flex flex-col flex-shrink-0 transition-all duration-200 overflow-hidden"
-      style={{ width: open ? 260 : 0, background: c.sidebar, borderRight: open ? `1px solid ${c.sbBorder}` : "none" }}
+      className="max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-40 flex min-h-0 flex-col flex-shrink-0 transition-all duration-200 overflow-hidden"
+      aria-hidden={!open}
+      style={{ width: open ? 260 : 0, maxWidth: "85vw", visibility: open ? "visible" : "hidden", background: c.sidebar, borderRight: open ? `1px solid ${c.sbBorder}` : "none" }}
     >
       <div className="flex items-center justify-between px-4 h-14 flex-shrink-0">
         <div className="flex items-center gap-2.5">
@@ -105,7 +108,7 @@ export default function Sidebar({ c, open, onClose, user, onLogout, children }: 
         </button>
       </div>
 
-      <div className="px-3 space-y-0.5">
+      <div className="px-3 shrink-0 space-y-0.5">
         {PRIMARY_NAV.map(item => (
           <NavItem key={item.to} c={c} icon={item.icon} label={item.to === "/chat" ? t("chat") : item.label} to={item.to} active={location.pathname === item.to} />
         ))}
@@ -115,36 +118,71 @@ export default function Sidebar({ c, open, onClose, user, onLogout, children }: 
       </div>
 
       {children && (
-        <nav className="flex-1 px-3 py-2 overflow-y-auto space-y-0.5" style={{ borderTop: `1px solid ${c.sbBorder}`, marginTop: 8 }}>
+        <nav aria-label="Chat history" className="sidebar-scrollbar flex-1 min-h-0 px-3 py-2 overflow-y-auto overflow-x-hidden overscroll-contain space-y-0.5" style={{ borderTop: `1px solid ${c.sbBorder}`, marginTop: 8, scrollbarColor: `${c.sbText} transparent`, scrollbarWidth: "thin", scrollbarGutter: "stable" }}>
           {children}
         </nav>
       )}
       {!children && <div className="flex-1" />}
 
       <div className="px-3 py-3 flex-shrink-0 space-y-0.5" style={{ borderTop: `1px solid ${c.sbBorder}` }}>
-        <NavItem c={c} icon={theme === "dark" ? Sun : Moon} label={theme === "dark" ? "Light mode" : "Dark mode"} onClick={toggleTheme} />
-        {user?.role !== "admin" && <NavItem c={c} icon={CreditCard} label="See plans and pricing" to="/pricing" />}
-        <NavItem c={c} icon={Settings} label={t("settings")} onClick={() => setSettingsOpen(true)} />
-        <NavItem c={c} icon={HelpCircle} label={t("help")} onClick={() => setHelpOpen(true)} />
-
         {user ? (
-          <div className="mt-2 rounded-2xl p-4" style={{ background: c.ctaBg, border: `1px solid ${c.ctaBorder}` }}>
-            <p className="text-[13px] font-semibold mb-1 leading-snug truncate" style={{ color: c.sbFg, ...JK }}>
-              {user.name}
-            </p>
-            <p className="text-[11px] leading-relaxed mb-3 font-mono truncate" style={{ color: c.sbText }}>
-              {user.email}
-            </p>
-            <button
-              onClick={onLogout}
-              className="w-full py-2 rounded-xl text-[13px] font-semibold flex items-center justify-center gap-2 transition-opacity hover:opacity-90"
-              style={{ background: c.sbHover, color: c.sbFg }}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                aria-label="Open profile menu"
+                className="flex w-full items-center gap-3 rounded-xl p-3 text-left transition-colors hover:bg-[var(--profile-hover)] data-[state=open]:bg-[var(--profile-hover)] focus-visible:outline-2 focus-visible:outline-offset-2"
+                style={{ color: c.sbFg, "--profile-hover": c.sbHover } as React.CSSProperties}
+              >
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#7c5af0] text-xs font-semibold text-white">
+                  {user.name.trim().split(/\s+/).slice(0, 2).map(part => part[0]).join("").toUpperCase() || "U"}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[13px] font-semibold" style={JK}>{user.name}</span>
+                  <span className="block truncate text-[11px]" style={{ color: c.sbText }}>{user.email}</span>
+                </span>
+                <ChevronsUpDown size={15} className="shrink-0" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              side="top"
+              align="start"
+              sideOffset={8}
+              collisionPadding={12}
+              className="w-60 max-w-[calc(100vw-24px)] rounded-2xl p-2"
+              style={{ background: c.sidebar, color: c.sbFg, borderColor: c.sbBorder }}
             >
-              <LogOut size={14} strokeWidth={1.5} />
-              {t("logout")}
-            </button>
-          </div>
+              <div className="px-3 py-2">
+                <p className="truncate text-sm font-semibold">{user.name}</p>
+                <p className="truncate text-xs" style={{ color: c.sbText }}>{user.email}</p>
+              </div>
+              <DropdownMenuSeparator style={{ background: c.sbBorder }} />
+              <DropdownMenuItem className="rounded-lg px-3 py-2.5" onSelect={toggleTheme}>
+                {theme === "dark" ? <Sun /> : <Moon />}
+                {theme === "dark" ? "Light mode" : "Dark mode"}
+              </DropdownMenuItem>
+              {user.role !== "admin" && (
+                <DropdownMenuItem asChild className="rounded-lg px-3 py-2.5">
+                  <Link to="/pricing"><CreditCard /> See plans and pricing</Link>
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuItem className="rounded-lg px-3 py-2.5" onSelect={() => setSettingsOpen(true)}>
+                <Settings /> {t("settings")}
+              </DropdownMenuItem>
+              <DropdownMenuItem className="rounded-lg px-3 py-2.5" onSelect={() => setHelpOpen(true)}>
+                <HelpCircle /> {t("help")}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator style={{ background: c.sbBorder }} />
+              <DropdownMenuItem className="rounded-lg px-3 py-2.5" onSelect={onLogout}>
+                <LogOut /> {t("logout")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         ) : (
+          <div>
+            <NavItem c={c} icon={theme === "dark" ? Sun : Moon} label={theme === "dark" ? "Light mode" : "Dark mode"} onClick={toggleTheme} />
+            <NavItem c={c} icon={CreditCard} label="See plans and pricing" to="/pricing" />
+            <NavItem c={c} icon={Settings} label={t("settings")} onClick={() => setSettingsOpen(true)} />
+            <NavItem c={c} icon={HelpCircle} label={t("help")} onClick={() => setHelpOpen(true)} />
           <div className="mt-2 rounded-2xl p-4" style={{ background: c.ctaBg, border: `1px solid ${c.ctaBorder}` }}>
             <p className="text-[13px] font-semibold mb-1 leading-snug" style={{ color: c.sbFg, ...JK }}>
               Get responses tailored to you
@@ -152,6 +190,7 @@ export default function Sidebar({ c, open, onClose, user, onLogout, children }: 
             <p className="text-[11px] leading-relaxed mb-3 font-mono" style={{ color: c.sbText }}>
               Log in to get answers based on saved chats, upload files, and track your progress.
             </p>
+          </div>
           </div>
         )}
       </div>

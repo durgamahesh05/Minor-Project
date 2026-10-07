@@ -22,3 +22,7 @@ venv/
 Thumbs.db
 .vscode/*
 !.vscode/extensions.json
+
+backend/chroma_db/
+
+.pytest_cache/

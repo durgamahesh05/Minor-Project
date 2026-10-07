@@ -1,6 +1,9 @@
 import os
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from qdrant_client.models import Condition
 
 
 class QdrantVectorStore:
@@ -24,7 +27,7 @@ class QdrantVectorStore:
             self.client.upsert(collection_name=self.collection, points=points, wait=True)
 
     def search(self, vector: list[float], user_id: str, limit: int = 5, document_id: str | None = None):
-        conditions = [self.models.FieldCondition(key="user_id", match=self.models.MatchValue(value=user_id))]
+        conditions: list[Condition] = [self.models.FieldCondition(key="user_id", match=self.models.MatchValue(value=user_id))]
         if document_id:
             conditions.append(self.models.FieldCondition(key="document_id", match=self.models.MatchValue(value=document_id)))
         user_filter = self.models.Filter(must=conditions)

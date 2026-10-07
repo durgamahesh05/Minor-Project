@@ -174,6 +174,9 @@ export default function LandingPage() {
 
           {/* Mobile toggle */}
           <button
+            aria-label={menuOpen ? "Close navigation" : "Open navigation"}
+            aria-expanded={menuOpen}
+            aria-controls="mobile-navigation"
             onClick={() => setMenuOpen(o => !o)}
             className="md:hidden p-2 text-[#8a9ab8] hover:text-white transition-colors"
           >
@@ -182,7 +185,7 @@ export default function LandingPage() {
         </div>
 
         {menuOpen && (
-          <div className="md:hidden border-b border-[rgba(255,255,255,0.07)] bg-[#080d1a] px-6 pb-4 space-y-1">
+          <div id="mobile-navigation" className="md:hidden border-b border-[rgba(255,255,255,0.07)] bg-[#080d1a] px-6 pb-4 space-y-1">
             {nav.map(l => (
               <button
                 key={l.id}
@@ -219,6 +222,7 @@ export default function LandingPage() {
       </header>
 
       {/* ── Hero ───────────────────────────────────────────────────────────── */}
+      <main id="main-content">
       <section id="home" className="pt-36 pb-28 px-6">
         <div className="max-w-[1160px] mx-auto">
           {/* Text block */}
@@ -231,7 +235,7 @@ export default function LandingPage() {
             </div>
 
             <h1
-              className="text-[52px] md:text-[66px] font-bold leading-[1.08] tracking-tight text-white mb-6"
+              className="text-[clamp(2rem,8vw,3.25rem)] md:text-[66px] font-bold leading-[1.08] tracking-tight text-white mb-6"
               style={JK}
             >
               Study{" "}
@@ -269,11 +273,11 @@ export default function LandingPage() {
               </button>
             </div>
 
-            <div className="flex items-center gap-8 mt-10">
+            <div className="flex flex-wrap justify-center items-center gap-4 sm:gap-8 mt-10">
               {[["2.4M", "notes processed"], ["140K", "active students"], ["98%", "retention lift"]].map(([v, l]) => (
                 <div key={l} className="text-center">
                   <p className="text-[18px] font-bold text-white tabular-nums" style={JK}>{v}</p>
-                  <p className="text-[11px] font-mono text-[#6b7a99] mt-0.5">{l}</p>
+                  <p className="text-[11px] font-mono text-[#93a3bf] mt-0.5">{l}</p>
                 </div>
               ))}
             </div>
@@ -309,7 +313,7 @@ export default function LandingPage() {
                   className="flex-1 mx-3 h-6 rounded-md flex items-center px-3"
                   style={{ background: "#0e1628" }}
                 >
-                  <span className="text-[10px] font-mono text-[#3d4f6b]">app.synapse.ai/chat</span>
+                  <span className="text-[10px] font-mono text-[#93a3bf]">app.synapse.ai/chat</span>
                 </div>
               </div>
 
@@ -342,7 +346,7 @@ export default function LandingPage() {
                         style={{ background: color as string, opacity: 0.6 }}
                       />
                       <div className="flex-1 min-w-0">
-                        <p className="text-[9px] text-[#6b7a99] truncate">{name as string}</p>
+                        <p className="text-[9px] text-[#93a3bf] truncate">{name as string}</p>
                         <div className="w-full h-0.5 bg-[#1a2540] rounded-full mt-1 overflow-hidden">
                           <div className="h-full rounded-full" style={{ width: `${pct}%`, background: color as string }} />
                         </div>
@@ -389,7 +393,7 @@ export default function LandingPage() {
 
                   {/* Input */}
                   <div className="mt-auto flex items-center gap-2.5 px-4 py-2.5 rounded-2xl border border-[rgba(255,255,255,0.08)]" style={{ background: "#111827" }}>
-                    <span className="text-[11px] text-[#3d4f6b] flex-1 font-mono">What's still unclear from Chapter 12?</span>
+                    <span className="text-[11px] text-[#93a3bf] flex-1 font-mono">What's still unclear from Chapter 12?</span>
                     <div className="w-6 h-6 rounded-full bg-[#7c5af0] flex items-center justify-center">
                       <ArrowUp size={11} strokeWidth={2.5} className="text-white" />
                     </div>
@@ -405,7 +409,7 @@ export default function LandingPage() {
       <section id="features" className="py-28 px-6" style={{ background: "#060c18" }}>
         <div className="max-w-[1160px] mx-auto">
           <div className="text-center mb-16">
-            <p className="text-[10px] font-mono text-[#7c5af0] uppercase tracking-[0.16em] mb-3">
+            <p className="text-[10px] font-mono text-[#b39afa] uppercase tracking-[0.16em] mb-3">
               Everything you need
             </p>
             <h2 className="text-[40px] md:text-[48px] font-bold text-white tracking-tight" style={JK}>
@@ -441,7 +445,7 @@ export default function LandingPage() {
       <section id="how-it-works" className="py-28 px-6">
         <div className="max-w-[1160px] mx-auto">
           <div className="text-center mb-20">
-            <p className="text-[10px] font-mono text-[#7c5af0] uppercase tracking-[0.16em] mb-3">
+            <p className="text-[10px] font-mono text-[#b39afa] uppercase tracking-[0.16em] mb-3">
               Simple by design
             </p>
             <h2 className="text-[40px] md:text-[48px] font-bold text-white tracking-tight" style={JK}>
@@ -479,7 +483,7 @@ export default function LandingPage() {
       <section id="pricing" className="py-28 px-6">
         <div className="max-w-[1160px] mx-auto">
           <div className="text-center mb-16">
-            <p className="text-[10px] font-mono text-[#7c5af0] uppercase tracking-[0.16em] mb-3">
+            <p className="text-[10px] font-mono text-[#b39afa] uppercase tracking-[0.16em] mb-3">
               Straightforward pricing
             </p>
             <h2 className="text-[40px] md:text-[48px] font-bold text-white tracking-tight" style={JK}>
@@ -499,7 +503,7 @@ export default function LandingPage() {
 
             {/* Left — info */}
             <div>
-              <p className="text-[10px] font-mono text-[#7c5af0] uppercase tracking-[0.16em] mb-3">
+              <p className="text-[10px] font-mono text-[#b39afa] uppercase tracking-[0.16em] mb-3">
                 Get in touch
               </p>
               <h2 className="text-[38px] font-bold text-white tracking-tight mb-5" style={JK}>
@@ -523,7 +527,7 @@ export default function LandingPage() {
                       <c.icon size={17} strokeWidth={1.5} className="text-[#a78bfa]" />
                     </div>
                     <div>
-                      <p className="text-[10px] font-mono text-[#6b7a99] uppercase tracking-wider mb-0.5">
+                      <p className="text-[10px] font-mono text-[#93a3bf] uppercase tracking-wider mb-0.5">
                         {c.label}
                       </p>
                       <p className="text-[14px] text-[#c8d4e8]">{c.value}</p>
@@ -540,6 +544,7 @@ export default function LandingPage() {
       </section>
 
       {/* ── Footer ─────────────────────────────────────────────────────────── */}
+      </main>
       <footer className="border-t border-[rgba(255,255,255,0.07)] py-16 px-6" style={{ background: "#050a14" }}>
         <div className="max-w-[1160px] mx-auto">
           <div className="grid grid-cols-2 md:grid-cols-5 gap-10 mb-14">
@@ -551,17 +556,18 @@ export default function LandingPage() {
                 </div>
                 <span className="text-[15px] font-bold text-white" style={JK}>Synapse</span>
               </div>
-              <p className="text-[13px] text-[#6b7a99] leading-relaxed max-w-[240px] mb-6">
+              <p className="text-[13px] text-[#93a3bf] leading-relaxed max-w-[240px] mb-6">
                 AI-powered study platform that turns your documents into a personal knowledge base.
               </p>
               <div className="flex items-center gap-2">
                 {[Twitter, Github, Linkedin].map((Icon, i) => (
                   <button
                     key={i}
+                    aria-label={["Twitter", "GitHub", "LinkedIn"][i]}
                     className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors hover:bg-[rgba(255,255,255,0.08)]"
                     style={{ background: "rgba(255,255,255,0.05)" }}
                   >
-                    <Icon size={14} strokeWidth={1.5} className="text-[#6b7a99]" />
+                    <Icon size={14} strokeWidth={1.5} className="text-[#93a3bf]" />
                   </button>
                 ))}
               </div>
@@ -574,7 +580,7 @@ export default function LandingPage() {
               { heading: "Support",  links: ["Docs", "Help center", "Privacy", "Terms"]     },
             ].map(col => (
               <div key={col.heading}>
-                <p className="text-[10px] font-mono uppercase tracking-[0.1em] text-[#6b7a99] mb-4">
+                <p className="text-[10px] font-mono uppercase tracking-[0.1em] text-[#93a3bf] mb-4">
                   {col.heading}
                 </p>
                 <ul className="space-y-2.5">
@@ -593,10 +599,10 @@ export default function LandingPage() {
           <div
             className="flex flex-col md:flex-row items-center justify-between gap-4 pt-8 border-t border-[rgba(255,255,255,0.07)]"
           >
-            <p className="text-[12px] font-mono text-[#3d4f6b]">
+            <p className="text-[12px] font-mono text-[#93a3bf]">
               © 2026 Synapse AI, Inc. All rights reserved.
             </p>
-            <p className="text-[12px] font-mono text-[#3d4f6b]">Made for students, by students.</p>
+            <p className="text-[12px] font-mono text-[#93a3bf]">Made for students, by students.</p>
           </div>
         </div>
       </footer>

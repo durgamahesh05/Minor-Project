@@ -25,10 +25,10 @@ export default function PricingCards({ onCta }: { onCta: (cta: string) => void }
 
           <div className="mb-6">
             <h3 className="text-[16px] font-bold text-white mb-1" style={JK}>{p.name}</h3>
-            <p className="text-[12px] text-[#6b7a99] font-mono mb-4">{p.desc}</p>
+            <p className="text-[12px] text-[#93a3bf] font-mono mb-4">{p.desc}</p>
             <div className="flex items-baseline gap-1.5">
               <span className="text-[38px] font-bold text-white tabular-nums" style={JK}>{p.price}</span>
-              <span className="text-[12px] font-mono text-[#6b7a99]">/ {p.period}</span>
+              <span className="text-[12px] font-mono text-[#93a3bf]">/ {p.period}</span>
             </div>
           </div>
 

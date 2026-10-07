@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect } from "react";
+import { lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { ThemeProvider } from "./context/ThemeContext";
@@ -42,19 +42,6 @@ function AppSkeleton() {
   );
 }
 
-// Trackpad pinch gestures and ctrl+scroll both fire as wheel events with
-// ctrlKey set, which the browser interprets as a page-zoom request. That
-// makes the whole layout jump around, so we intercept it app-wide.
-function usePreventBrowserZoom() {
-  useEffect(() => {
-    const onWheel = (e: WheelEvent) => {
-      if (e.ctrlKey) e.preventDefault();
-    };
-    window.addEventListener("wheel", onWheel, { passive: false });
-    return () => window.removeEventListener("wheel", onWheel);
-  }, []);
-}
-
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
 
@@ -83,7 +70,6 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
 }
 
 function AppRoutes() {
-  usePreventBrowserZoom();
 
   return (
     <Routes>

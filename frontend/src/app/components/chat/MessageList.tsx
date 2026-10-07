@@ -1,3 +1,5 @@
+import DocumentCard from "./DocumentCard";
+import { Link } from "react-router";
 import { Brain } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import rehypeKatex from "rehype-katex";
@@ -26,16 +28,8 @@ export default function MessageList({ c, messages, isTyping }: Props) {
               <Brain size={14} strokeWidth={2} className="text-white" />
             </div>
           )}
-          <div
-            className={`min-w-0 break-words text-[14px] leading-[1.7] ${
-              m.role === "user" ? "max-w-[85%] px-4 py-3 rounded-2xl rounded-tr-md" : "flex-1 py-1"
-            }`}
-            style={{
-              background: m.role === "user" ? c.userBubble : "transparent",
-              border: m.role === "user" ? `1px solid ${c.userBorder}` : "none",
-              color: c.mainFg,
-            }}
-          >
+          <div className={`min-w-0 text-[14px] leading-[1.7] ${m.role === "user" ? "flex max-w-[90%] flex-col items-end gap-2" : "flex-1 py-1"}`} style={{ color: c.mainFg }}>
+            {m.role === "user" && (m.attachments ?? (m.attachment ? [m.attachment] : [])).map(document => <DocumentCard key={document.id} document={document} c={c} />)}
             {m.role === "assistant" ? (
               <div className="message-markdown">
                 <ReactMarkdown
@@ -44,9 +38,17 @@ export default function MessageList({ c, messages, isTyping }: Props) {
                 >
                   {m.text}
                 </ReactMarkdown>
+                {m.studyActions?.map(action => (
+                  <Link key={action.kind}
+                    to={action.id ? `/${action.kind}/${action.id}` : `/${action.kind}`}
+                    className="inline-flex mt-3 mr-3 rounded-full px-4 py-2 text-sm font-semibold"
+                    style={{ background: "#7c5af0", color: "white" }}>
+                    {action.id ? (action.kind === "quiz" ? "Start quiz" : "Study flashcards") : (action.kind === "quiz" ? "Open quiz dashboard" : "Open flashcards dashboard")}
+                  </Link>
+                ))}
               </div>
             ) : (
-              <div className="whitespace-pre-wrap break-words">{m.text}</div>
+              <div className="max-w-full whitespace-pre-wrap break-words rounded-2xl rounded-tr-md px-4 py-3" style={{ background: c.userBubble, border: `1px solid ${c.userBorder}` }}>{m.text}</div>
             )}
           </div>
         </div>

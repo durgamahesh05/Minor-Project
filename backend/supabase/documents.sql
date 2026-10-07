@@ -1,3 +1,4 @@
+-- Legacy file-storage schema. For active metadata-only uploads, run uploaded_documents.sql.
 -- Run once in the Supabase SQL Editor for the project used by Synapse.
 -- MongoDB remains the application's source of truth for users, sessions,
 -- chats, quizzes, flashcards and document references. This schema exists only

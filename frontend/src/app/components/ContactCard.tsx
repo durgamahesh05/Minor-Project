@@ -12,7 +12,7 @@ export default function ContactCard() {
   };
 
   return (
-    <div className="p-8 rounded-2xl border border-[rgba(255,255,255,0.07)]" style={{ background: "#0a1020" }}>
+    <div className="p-5 sm:p-8 rounded-2xl border border-[rgba(255,255,255,0.07)]" style={{ background: "#0a1020" }}>
       {submitted ? (
         <div className="h-full flex flex-col items-center justify-center text-center gap-5 py-10">
           <div
@@ -25,7 +25,7 @@ export default function ContactCard() {
           <p className="text-[14px] text-[#8a9ab8] max-w-[260px]">We'll get back to you within 24 hours.</p>
           <button
             onClick={() => { setSubmitted(false); setForm({ name: "", email: "", message: "" }); }}
-            className="text-[13px] text-[#7c5af0] hover:text-[#a78bfa] transition-colors font-mono mt-1"
+            className="text-[13px] text-[#b39afa] hover:text-[#a78bfa] transition-colors font-mono mt-1"
           >
             Send another →
           </button>
@@ -39,28 +39,30 @@ export default function ContactCard() {
             { label: "Email address", key: "email", type: "email", ph: "alex@university.edu" },
           ].map(f => (
             <div key={f.key}>
-              <label className="text-[10px] font-mono uppercase tracking-[0.1em] text-[#6b7a99] mb-1.5 block">
+              <label htmlFor={`contact-${f.key}`} className="text-[10px] font-mono uppercase tracking-[0.1em] text-[#93a3bf] mb-1.5 block">
                 {f.label}
               </label>
               <input
+                id={`contact-${f.key}`}
                 type={f.type}
                 placeholder={f.ph}
                 value={form[f.key as keyof typeof form]}
                 onChange={e => setForm(prev => ({ ...prev, [f.key]: e.target.value }))}
-                className="w-full rounded-xl px-4 py-2.5 text-[13px] text-[#e2e6f0] placeholder:text-[#3d4f6b] focus:outline-none focus:ring-1 focus:ring-[#7c5af0]/30 transition-colors"
+                className="w-full rounded-xl px-4 py-2.5 text-[13px] text-[#e2e6f0] placeholder:text-[#93a3bf] focus:outline-none focus:ring-1 focus:ring-[#7c5af0]/30 transition-colors"
                 style={{ background: "#111827", border: "1px solid rgba(255,255,255,0.09)" }}
               />
             </div>
           ))}
 
           <div>
-            <label className="text-[10px] font-mono uppercase tracking-[0.1em] text-[#6b7a99] mb-1.5 block">Message</label>
+            <label htmlFor="contact-message" className="text-[10px] font-mono uppercase tracking-[0.1em] text-[#93a3bf] mb-1.5 block">Message</label>
             <textarea
+              id="contact-message"
               rows={4}
               placeholder="Tell us how we can help…"
               value={form.message}
               onChange={e => setForm(prev => ({ ...prev, message: e.target.value }))}
-              className="w-full rounded-xl px-4 py-2.5 text-[13px] text-[#e2e6f0] placeholder:text-[#3d4f6b] focus:outline-none focus:ring-1 focus:ring-[#7c5af0]/30 transition-colors resize-none"
+              className="w-full rounded-xl px-4 py-2.5 text-[13px] text-[#e2e6f0] placeholder:text-[#93a3bf] focus:outline-none focus:ring-1 focus:ring-[#7c5af0]/30 transition-colors resize-none"
               style={{ background: "#111827", border: "1px solid rgba(255,255,255,0.09)" }}
             />
           </div>

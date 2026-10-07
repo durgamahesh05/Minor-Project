@@ -7,7 +7,11 @@ def read_pptx(content: bytes) -> str:
     presentation = Presentation(BytesIO(content))
     slides = []
     for slide in presentation.slides:
-        text = [shape.text for shape in slide.shapes if hasattr(shape, "text") and shape.text.strip()]
+        text = []
+        for shape in slide.shapes:
+            value = getattr(shape, "text", None)
+            if isinstance(value, str) and value.strip():
+                text.append(value)
         if text:
             slides.append("\n".join(text))
     return "\n\n".join(slides).strip()

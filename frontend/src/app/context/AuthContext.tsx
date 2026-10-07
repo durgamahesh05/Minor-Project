@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { api, ApiError, type User } from "../lib/api";
 
 type AuthContextValue = {
@@ -12,22 +12,42 @@ type AuthContextValue = {
 };
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
+const PROFILE_KEY = "synapse-session-profile-v1";
+function cachedUser(): User | null {
+  try {
+    const cached = JSON.parse(sessionStorage.getItem(PROFILE_KEY) || "null");
+    return cached && Date.now() - cached.time < 300000 && typeof cached.user?.id === "string" ? cached.user : null;
+  } catch { return null; }
+}
+function cacheUser(user: User | null) {
+  try {
+    if (user) sessionStorage.setItem(PROFILE_KEY, JSON.stringify({ user, time: Date.now() }));
+    else sessionStorage.removeItem(PROFILE_KEY);
+  } catch { /* Storage may be disabled. Authentication still works. */ }
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState<User | null>(cachedUser);
+  const [loading, setLoading] = useState(!user);
+  const revision = useRef(0);
 
   useEffect(() => {
+    const current = revision.current;
+    let active = true;
     api
       .me()
-      .then(({ user }) => setUser(user))
-      .catch(() => setUser(null))
-      .finally(() => setLoading(false));
+      .then(({ user }) => { if (active && current === revision.current) { setUser(user); cacheUser(user); } })
+      .catch(() => { if (active && current === revision.current) { setUser(null); cacheUser(null); } })
+      .finally(() => { if (active && current === revision.current) setLoading(false); });
+    return () => { active = false; };
   }, []);
 
   const login = async (email: string, password: string) => {
     const { user } = await api.login(email, password);
+    revision.current++;
     setUser(user);
+    cacheUser(user);
+    setLoading(false);
     return user;
   };
 
@@ -41,7 +61,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const verifyRegistration = async (email: string, otp: string) => {
     const { user } = await api.verifyRegistration(email, otp);
+    revision.current++;
     setUser(user);
+    cacheUser(user);
+    setLoading(false);
     return user;
   };
 
@@ -51,12 +74,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = async () => {
+    revision.current++;
     try {
       await api.logout();
     } finally {
       // Clear the local authenticated state even if a stale server session has
       // already expired, so the user is never left trapped in the app.
       setUser(null);
+      cacheUser(null);
+      setLoading(false);
     }
   };
 

@@ -1,0 +1,15 @@
+# Synapse AI
+
+> A study assistant for asking questions about uploaded learning materials.
+
+## Public pages
+
+- [Home](/): Overview of Synapse AI.
+- [Pricing](/pricing): Available plans.
+
+## Account access
+
+- [Sign in](/login): Sign in to your account.
+- [Register](/register): Create an account.
+
+User documents, conversations, quizzes, and flashcards require authentication.

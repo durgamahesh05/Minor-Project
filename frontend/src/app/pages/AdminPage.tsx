@@ -21,7 +21,7 @@ export default function AdminPage() {
   const navigate = useNavigate();
 
   const { theme } = useTheme();
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(() => window.matchMedia("(min-width: 768px)").matches);
   const [tab, setTab] = useState<Tab>("users");
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -121,7 +121,7 @@ export default function AdminPage() {
     : [];
 
   return (
-    <div className="flex h-screen overflow-hidden" style={{ background: c.main, fontFamily: "'Inter', sans-serif" }}>
+    <div className="flex h-dvh min-h-0 overflow-hidden" style={{ background: c.main, fontFamily: "'Inter', sans-serif" }}>
       <Sidebar
         c={c}
         open={sidebarOpen}
@@ -133,7 +133,7 @@ export default function AdminPage() {
       <div className="flex-1 flex flex-col min-w-0">
         <Header c={c} sidebarOpen={sidebarOpen} onOpenSidebar={() => setSidebarOpen(true)} user={user} />
 
-        <div className="flex-1 overflow-y-auto px-6 py-8">
+        <div role="main" className="flex-1 min-w-0 overflow-y-auto px-4 sm:px-6 py-8">
           <div className="max-w-[980px] mx-auto space-y-6">
             <div className="flex items-center gap-2.5">
               <ShieldCheck size={20} strokeWidth={1.5} style={{ color: "#7c5af0" }} />

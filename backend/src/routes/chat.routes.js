@@ -64,6 +64,24 @@ router.post("/conversations", async (req, res, next) => {
   }
 });
 
+router.patch("/conversations/:id", async (req, res, next) => {
+  try {
+    const title = typeof req.body?.title === "string" ? req.body.title.trim() : "";
+    if (!title || title.length > 80) {
+      return res.status(400).json({ message: "Chat title must contain 1 to 80 characters" });
+    }
+    const conversation = await Conversation.findOneAndUpdate(
+      { _id: req.params.id, userId: req.session.userId },
+      { $set: { title } },
+      { new: true, timestamps: false },
+    );
+    if (!conversation) return res.status(404).json({ message: "Conversation not found" });
+    res.json({ conversation: toPublicConversation(conversation) });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.delete("/conversations/:id", async (req, res, next) => {
   try {
     const conversation = await Conversation.findOneAndDelete({ _id: req.params.id, userId: req.session.userId });

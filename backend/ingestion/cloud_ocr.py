@@ -20,6 +20,10 @@ def extract_text(content: bytes, mime_type: str = "image/jpeg") -> str:
         raise CloudOCRError("OCR_KEY is not configured")
 
     endpoint = os.getenv("OCR_API_URL", "https://api.ocr.space/parse/image")
+    try:
+        timeout = max(1, min(45, float(os.getenv("OCR_TIMEOUT_SECONDS", "12"))))
+    except ValueError as error:
+        raise CloudOCRError("OCR_TIMEOUT_SECONDS must be a number") from error
     encoded = base64.b64encode(content).decode("ascii")
     try:
         response = resources.http.post(
@@ -31,7 +35,7 @@ def extract_text(content: bytes, mime_type: str = "image/jpeg") -> str:
                 "isOverlayRequired": "false",
                 "OCREngine": "2",
             },
-            timeout=45,
+            timeout=timeout,
         )
         response.raise_for_status()
         payload = response.json()

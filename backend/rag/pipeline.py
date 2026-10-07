@@ -2,15 +2,19 @@
 import os
 import logging
 from threading import Lock
+from time import perf_counter
 from dataclasses import dataclass
 from typing import Any
 
 from bson import ObjectId
+from pydantic import SecretStr
 
 from embeddings.embedder import Embedder
 from ingestion.multimodal import ContentElement, extract_elements
 from vectorstore.qdrant import QdrantVectorStore
+from vectorstore.chroma import ChromaVectorStore
 from rag.resources import resources
+from rag.response_policy import ResponseLevel, response_policy
 
 logger = logging.getLogger(__name__)
 
@@ -58,8 +62,8 @@ class MultimodalRAG:
         self.embedder = Embedder()
         self._vectorstore = None
         self._vectorstore_lock = Lock()
-        self.text_model = ChatGroq(model=os.getenv("GROQ_TEXT_MODEL", "qwen/qwen3.8-27b"), temperature=0.2, api_key=os.getenv("GROQ_API_KEY"))
-        self.vision_model = ChatGroq(model=os.getenv("GROQ_VISION_MODEL", "qwen/qwen3.8-27b"), temperature=0.2, api_key=os.getenv("GROQ_API_KEY"))
+        self.text_model = ChatGroq(model=os.getenv("GROQ_TEXT_MODEL", "qwen/qwen3.8-27b"), temperature=0.2, api_key=SecretStr(os.environ["GROQ_API_KEY"]) if os.getenv("GROQ_API_KEY") else None)
+        self.vision_model = ChatGroq(model=os.getenv("GROQ_VISION_MODEL", "qwen/qwen3.8-27b"), temperature=0.2, timeout=30, max_retries=1, api_key=SecretStr(os.environ["GROQ_API_KEY"]) if os.getenv("GROQ_API_KEY") else None)
         self.summary_chain = ChatPromptTemplate.from_template(SUMMARY_PROMPT) | self.text_model | StrOutputParser()
 
     @property
@@ -68,8 +72,14 @@ class MultimodalRAG:
         if self._vectorstore is None:
             with self._vectorstore_lock:
                 if self._vectorstore is None:
-                    probe = self.embedder.embed_query("vector dimension probe")
-                    self._vectorstore = QdrantVectorStore(len(probe))
+                    dimension = getattr(self, "_vector_dimension", None)
+                    if dimension is None:
+                        dimension = len(self.embedder.embed_query("vector dimension probe"))
+                    provider = os.getenv("VECTOR_STORE", "qdrant").lower()
+                    if provider not in ("chroma", "qdrant"):
+                        raise ValueError("VECTOR_STORE must be chroma or qdrant")
+                    store_type = ChromaVectorStore if provider == "chroma" else QdrantVectorStore
+                    self._vectorstore = store_type(dimension)
         return self._vectorstore
 
     @vectorstore.setter
@@ -83,7 +93,7 @@ class MultimodalRAG:
             {"type": "text", "text": "Describe this document image for retrieval. Include visible text, labels, chart trends, and relationships. Return only the description."},
             {"type": "image_url", "image_url": {"url": f'data:{element.metadata.get("mime_type", "image/jpeg")};base64,{element.content}'}},
         ])
-        return str(self.vision_model.invoke([message]).content)
+        return str(self.vision_model.bind(max_tokens=512).invoke([message]).content)
 
     def _summary(self, element: ContentElement) -> str:
         if element.kind == "image":
@@ -93,8 +103,11 @@ class MultimodalRAG:
         return element.content
 
     def ingest(self, filename: str, content: bytes, user_id: ObjectId, document_id: ObjectId) -> int:
+        started = perf_counter()
         logger.info("Extracting document %s (%s)", document_id, filename)
         elements = extract_elements(filename, content)
+        extracted = perf_counter()
+        logger.info("Document %s: extraction/OCR took %.2fs", document_id, extracted-started)
         if not elements:
             raise ValueError("No readable content was found in this document")
         logger.info("Document %s: summarizing %d extracted elements", document_id, len(elements))
@@ -102,13 +115,27 @@ class MultimodalRAG:
         # element order so each embedding stays linked to its source payload.
         summaries = [element.content for element in elements]
         image_indices = [index for index, element in enumerate(elements) if element.kind == "image"]
-        image_summaries = resources.map(self._summary, (elements[index] for index in image_indices))
-        for index, summary in zip(image_indices, image_summaries):
-            summaries[index] = summary
+        # Repeated PDF logos/figures need only one vision request per upload.
+        unique_images = {}
+        for index in image_indices:
+            element = elements[index]
+            unique_images.setdefault((element.content, element.metadata.get("mime_type")), element)
+        image_summaries = dict(zip(unique_images, resources.map(self._summary, unique_images.values())))
+        for index in image_indices:
+            element = elements[index]
+            summaries[index] = image_summaries[(element.content, element.metadata.get("mime_type"))]
+        summarized = perf_counter()
+        logger.info("Document %s: image summaries took %.2fs", document_id, summarized-extracted)
         logger.info("Document %s: generating embeddings", document_id)
-        vectors = self.embedder.embed(summaries)
-        if len(vectors) != len(elements):
+        unique_summaries = list(dict.fromkeys(summaries))
+        unique_vectors = self.embedder.embed(unique_summaries)
+        if len(unique_vectors) != len(unique_summaries):
             raise ValueError("Embedding count does not match extracted document elements")
+        self._vector_dimension = len(unique_vectors[0])
+        embedded = perf_counter()
+        logger.info("Document %s: embedding %d unique chunks took %.2fs", document_id, len(unique_summaries), embedded-summarized)
+        vector_by_summary = dict(zip(unique_summaries, unique_vectors))
+        vectors = [vector_by_summary[summary] for summary in summaries]
         records = []
         mongo_records = []
         for element, summary, vector in zip(elements, summaries, vectors):
@@ -117,12 +144,13 @@ class MultimodalRAG:
             mongo_records.append({"_id": element.id, "documentId": document_id, "userId": user_id, "kind": element.kind, "content": element.content, "summary": summary, "metadata": metadata})
         self.database.rag_elements.insert_many(mongo_records)
         try:
-            logger.info("Document %s: storing %d vectors in Qdrant", document_id, len(records))
+            logger.info("Document %s: storing %d vectors in configured vector store", document_id, len(records))
             self.vectorstore.upsert(records)
         except Exception:
             self.database.rag_elements.delete_many({"documentId": document_id})
             raise
-        logger.info("Document %s: indexed successfully (%d elements)", document_id, len(elements))
+        finished = perf_counter()
+        logger.info("Document %s: indexed %d elements in %.2fs (storage %.2fs)", document_id, len(elements), finished-started, finished-embedded)
         return len(elements)
 
     def retrieve(self, question: str, user_id: ObjectId, limit: int = 5, document_id: ObjectId | None = None) -> list[dict[str, Any]]:
@@ -139,17 +167,24 @@ class MultimodalRAG:
         result = str(self.text_model.invoke(ROUTER_PROMPT.format(question=question)).content).strip().upper()
         return "DOCUMENT" if result.startswith("DOCUMENT") else "GENERAL"
 
-    def general_answer(self, question: str) -> RAGAnswer:
-        response = self.text_model.invoke(GENERAL_PROMPT.format(question=question))
+    def general_answer(self, question: str, response_level: ResponseLevel = "simple") -> RAGAnswer:
+        from langchain_core.messages import SystemMessage, HumanMessage
+        policy = response_policy(question, response_level)
+        response = self.text_model.bind(max_tokens=policy.max_tokens).invoke([SystemMessage(content=policy.instruction), HumanMessage(content=GENERAL_PROMPT.format(question=question))])
         return RAGAnswer(str(response.content), [])
 
-    def chat(self, question: str, user_id: ObjectId, document_id: ObjectId | None = None) -> RAGAnswer:
-        return self.answer(question, user_id, document_id=document_id) if document_id is not None or self.route(question) == "DOCUMENT" else self.general_answer(question)
+    def chat(self, question: str, user_id: ObjectId, document_id: ObjectId | None = None, response_level: ResponseLevel = "simple") -> RAGAnswer:
+        return self.answer(question, user_id, document_id=document_id, response_level=response_level) if document_id is not None or self.route(question) == "DOCUMENT" else self.general_answer(question, response_level=response_level)
 
-    def answer(self, question: str, user_id: ObjectId, document_id: ObjectId | None = None) -> RAGAnswer:
+    def answer(self, question: str, user_id: ObjectId, document_id: ObjectId | None = None, response_level: ResponseLevel = "simple", document_ids: list[ObjectId] | None = None) -> RAGAnswer:
         from langchain_core.messages import HumanMessage
 
-        elements = self.retrieve(question, user_id, document_id=document_id)
+        if document_ids:
+            # Give every attachment context space; keep user/document filters on each query.
+            groups = resources.map(lambda ident: self.retrieve(question, user_id, limit=3, document_id=ident), document_ids)
+            elements = [element for group in groups for element in group]
+        else:
+            elements = self.retrieve(question, user_id, document_id=document_id)
         if not elements:
             return RAGAnswer("I could not find relevant information in your uploaded documents.", [])
         context_parts = []
@@ -166,9 +201,14 @@ class MultimodalRAG:
                 label = source["filename"] or "document"
                 if source["page"]:
                     label += f", page {source['page']}"
-                context_parts.append(f"[{label}; {element['kind']}]\n{element['content']}")
+                text = element.get("summary", "Image") if element["kind"] == "image" else element["content"]
+                context_parts.append(f"[{label}; {element['kind']}]\n{text}")
         prompt = ANSWER_PROMPT.format(context="\n\n".join(context_parts), question=question)
-        response = self.vision_model.invoke([HumanMessage(content=[{"type": "text", "text": prompt}, *image_parts])]) if image_parts else self.text_model.invoke(prompt)
+        from langchain_core.messages import SystemMessage
+        policy = response_policy(question, response_level)
+        model = self.vision_model if image_parts else self.text_model
+        content = [{"type": "text", "text": prompt}, *image_parts] if image_parts else prompt
+        response = model.bind(max_tokens=policy.max_tokens).invoke([SystemMessage(content=policy.instruction), HumanMessage(content=content)])
         return RAGAnswer(str(response.content), sources)
 
     def delete_document(self, document_id: ObjectId) -> None:
@@ -187,7 +227,9 @@ def close_rag_instances() -> None:
     for instance in instances:
         instance.embedder.clear_cache()
         if instance._vectorstore is not None:
-            instance._vectorstore.client.close()
+            close = getattr(instance._vectorstore.client, "close", None)
+            if callable(close):
+                close()
 
 
 def get_rag(database) -> MultimodalRAG:
@@ -205,8 +247,14 @@ def delete_document_artifacts(database, document_id: ObjectId) -> None:
     database.rag_elements.delete_many({"documentId": document_id})
     instance = _instances.get(id(database))
     if instance and instance._vectorstore is not None:
+        store = instance.vectorstore
+    elif os.getenv("VECTOR_STORE", "qdrant").lower() == "chroma":
+        store = ChromaVectorStore(0)
+    else:
+        store = None
+    if store is not None:
         try:
-            instance.vectorstore.delete_document(str(document_id))
+            store.delete_document(str(document_id))
         except Exception:
             # The authoritative parent payload is gone; stale vector hits are
             # ignored by retrieve() if Qdrant is temporarily unavailable.

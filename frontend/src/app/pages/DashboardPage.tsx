@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router";
+import { useNavigate, Link } from "react-router";
 import { FileText, Upload, Trash2, Download, ListChecks, Layers } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { api, ApiError, type Document } from "../lib/api";
-import { beginLocalDocument, chooseDocumentFile, deleteLocalDocument, downloadLocalDocument, listLocalDocuments, markLocalDocumentIndexed } from "../lib/documentStorage";
+import { beginLocalDocument, chooseDocumentFile, deleteLocalDocument, downloadLocalDocument, markLocalDocumentIndexed } from "../lib/documentStorage";
 import { getThemeColors, JK } from "../lib/theme";
 import { useTheme } from "../context/ThemeContext";
 import Sidebar from "../components/layout/Sidebar";
@@ -21,8 +21,9 @@ export default function DashboardPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { theme } = useTheme();
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(() => window.matchMedia("(min-width: 768px)").matches);
   const [documents, setDocuments] = useState<Document[]>([]);
+  const [counts, setCounts] = useState({ quizzes: 0, flashcards: 0 });
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,14 +32,13 @@ export default function DashboardPage() {
   const c = getThemeColors(theme);
 
   useEffect(() => {
-    Promise.all([api.listDocuments(), listLocalDocuments().catch(() => [])])
-      .then(([{ documents }, localDocuments]) => {
-        const localStatus = new Map(localDocuments.map(item => [item.clientDocumentId, item.status]));
-        setDocuments(documents.map(document => ({
-          ...document,
-          status: document.clientDocumentId && localStatus.get(document.clientDocumentId) === "processing" ? "processing" : document.status,
-        })));
+    Promise.all([api.listDocuments(), api.listQuizzes(), api.listFlashcardSets()])
+      .then(([{ documents }, { quizzes }, { sets }]) => {
+        // Server indexing status remains authoritative across browsers/restarts.
+        setDocuments(documents);
+        setCounts({ quizzes: quizzes.length, flashcards: sets.length });
       })
+      .catch(error => setError(error instanceof Error ? error.message : "Unable to load your dashboard."))
       .finally(() => setLoading(false));
   }, []);
 
@@ -109,6 +109,7 @@ export default function DashboardPage() {
   };
 
   const handleGenerateQuiz = async (documentId: string) => {
+    setError(null);
     setBusyDocId(documentId);
     try {
       const { quiz } = await api.createQuiz(documentId);
@@ -121,6 +122,7 @@ export default function DashboardPage() {
   };
 
   const handleGenerateFlashcards = async (documentId: string) => {
+    setError(null);
     setBusyDocId(documentId);
     try {
       const { set } = await api.createFlashcardSet(documentId);
@@ -133,7 +135,7 @@ export default function DashboardPage() {
   };
 
   return (
-    <div className="flex h-screen overflow-hidden" style={{ background: c.main, fontFamily: "'Inter', sans-serif" }}>
+    <div className="flex h-dvh min-h-0 overflow-hidden" style={{ background: c.main, fontFamily: "'Inter', sans-serif" }}>
       <Sidebar
         c={c}
         open={sidebarOpen}
@@ -145,9 +147,9 @@ export default function DashboardPage() {
       <div className="flex-1 flex flex-col min-w-0">
         <Header c={c} sidebarOpen={sidebarOpen} onOpenSidebar={() => setSidebarOpen(true)} user={user} />
 
-        <div className="flex-1 overflow-y-auto px-6 py-8">
+        <div role="main" className="flex-1 min-w-0 overflow-y-auto px-4 sm:px-6 py-8">
           <div className="max-w-[820px] mx-auto space-y-6">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
                 <h1 className="text-[22px] font-semibold" style={{ color: c.mainFg, ...JK }}>
                   Your documents
@@ -175,7 +177,13 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            {error && <p className="text-sm text-destructive">{error}</p>}
+            {!loading && !error && <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="rounded-xl border p-4" style={{ borderColor: c.chipBorder, color: c.mainFg }}>{documents.length} documents</div>
+              <Link to="/quiz" className="rounded-xl border p-4" style={{ borderColor: c.chipBorder, color: c.mainFg }}>{counts.quizzes} quizzes</Link>
+              <Link to="/flashcards" className="rounded-xl border p-4" style={{ borderColor: c.chipBorder, color: c.mainFg }}>{counts.flashcards} flashcard sets</Link>
+            </div>}
+            {busyDocId && <p role="status" className="text-sm" style={{ color: c.mainSub }}>Working on your document?</p>}
+            {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
 
             {loading ? (
               <p className="text-sm" style={{ color: c.mainSub }}>
@@ -196,7 +204,7 @@ export default function DashboardPage() {
                 {documents.map(doc => (
                   <div
                     key={doc.id}
-                    className="flex items-center gap-3 px-4 py-3 rounded-xl"
+                    className="flex flex-wrap items-center gap-3 px-4 py-3 rounded-xl"
                     style={{ background: c.chipBg, border: `1px solid ${c.chipBorder}` }}
                   >
                     <FileText size={18} strokeWidth={1.5} style={{ color: c.mainSub }} className="flex-shrink-0" />
@@ -205,13 +213,13 @@ export default function DashboardPage() {
                         {doc.originalName}
                       </p>
                       <p className="text-[11px] font-mono" style={{ color: c.mainSub }}>
-                        {formatSize(doc.size)} · {new Date(doc.createdAt).toLocaleDateString()}
+                        {doc.status} | {formatSize(doc.size)} · {new Date(doc.createdAt).toLocaleDateString()}
                       </p>
                     </div>
                     <div className="flex items-center gap-1 flex-shrink-0">
                       <button
                         title="Generate quiz"
-                        disabled={busyDocId === doc.id}
+                        disabled={busyDocId !== null || doc.status !== "indexed"}
                         onClick={() => handleGenerateQuiz(doc.id)}
                         className="p-2 rounded-lg transition-opacity hover:opacity-70 disabled:opacity-40"
                         style={{ color: c.mainSub }}
@@ -220,7 +228,7 @@ export default function DashboardPage() {
                       </button>
                       <button
                         title="Generate flashcards"
-                        disabled={busyDocId === doc.id}
+                        disabled={busyDocId !== null || doc.status !== "indexed"}
                         onClick={() => handleGenerateFlashcards(doc.id)}
                         className="p-2 rounded-lg transition-opacity hover:opacity-70 disabled:opacity-40"
                         style={{ color: c.mainSub }}
@@ -237,7 +245,7 @@ export default function DashboardPage() {
                       </button>
                       <button
                         title="Delete"
-                        disabled={busyDocId === doc.id}
+                        disabled={busyDocId !== null}
                         onClick={() => handleDelete(doc.id)}
                         className="p-2 rounded-lg transition-opacity hover:opacity-70 disabled:opacity-40"
                         style={{ color: "#e0365a" }}

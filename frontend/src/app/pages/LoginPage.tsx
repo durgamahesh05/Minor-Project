@@ -20,6 +20,8 @@ export default function LoginPage() {
     e.preventDefault();
     setError(null);
     setSubmitting(true);
+    // Load the destination while credentials are being checked.
+    void import("./ChatPage").catch(() => {});
     try {
       const user = await login(email, password);
       navigate(user.role === "admin" ? "/admin" : "/chat");

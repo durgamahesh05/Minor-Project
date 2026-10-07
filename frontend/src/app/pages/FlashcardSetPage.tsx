@@ -14,8 +14,9 @@ export default function FlashcardSetPage() {
   const navigate = useNavigate();
 
   const { theme } = useTheme();
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(() => window.matchMedia("(min-width: 768px)").matches);
   const [set, setSet] = useState<FlashcardSet | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [index, setIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
@@ -25,11 +26,13 @@ export default function FlashcardSetPage() {
   useEffect(() => {
     if (!id) return;
     setLoading(true);
+    setError(null);
     setIndex(0);
     setFlipped(false);
     api
       .getFlashcardSet(id)
       .then(({ set }) => setSet(set))
+      .catch(error => setError(error instanceof Error ? error.message : "Unable to load study materials."))
       .finally(() => setLoading(false));
   }, [id]);
 
@@ -47,7 +50,7 @@ export default function FlashcardSetPage() {
   };
 
   return (
-    <div className="flex h-screen overflow-hidden" style={{ background: c.main, fontFamily: "'Inter', sans-serif" }}>
+    <div className="flex h-dvh min-h-0 overflow-hidden" style={{ background: c.main, fontFamily: "'Inter', sans-serif" }}>
       <Sidebar
         c={c}
         open={sidebarOpen}
@@ -59,14 +62,14 @@ export default function FlashcardSetPage() {
       <div className="flex-1 flex flex-col min-w-0">
         <Header c={c} sidebarOpen={sidebarOpen} onOpenSidebar={() => setSidebarOpen(true)} user={user} />
 
-        <div className="flex-1 overflow-y-auto px-6 py-8">
+        <div role="main" className="flex-1 min-w-0 overflow-y-auto px-4 sm:px-6 py-8">
           <div className="max-w-[680px] mx-auto space-y-6">
             <Link to="/flashcards" className="text-[13px] flex items-center gap-1.5" style={{ color: c.mainSub }}>
               <ArrowLeft size={14} strokeWidth={2} />
               All flashcard sets
             </Link>
 
-            {loading || !set ? (
+            {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : loading || !set ? (
               <p className="text-sm" style={{ color: c.mainSub }}>
                 Loading…
               </p>
@@ -76,6 +79,7 @@ export default function FlashcardSetPage() {
                   {set.title}
                 </h1>
 
+                {set.cards.length === 0 && <p style={{ color: c.mainSub }}>This set has no cards. Generate a new set from your documents.</p>}
                 {card && (
                   <div className="flex flex-col items-center gap-4">
                     <button
@@ -95,6 +99,7 @@ export default function FlashcardSetPage() {
 
                     <div className="flex items-center gap-3">
                       <button
+                        aria-label="Previous card"
                         onClick={() => goTo(index - 1)}
                         disabled={index === 0}
                         className="p-2 rounded-lg transition-opacity hover:opacity-70 disabled:opacity-30"
@@ -111,6 +116,7 @@ export default function FlashcardSetPage() {
                         Flip
                       </button>
                       <button
+                        aria-label="Next card"
                         onClick={() => goTo(index + 1)}
                         disabled={index === set.cards.length - 1}
                         className="p-2 rounded-lg transition-opacity hover:opacity-70 disabled:opacity-30"

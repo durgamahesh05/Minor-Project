@@ -15,6 +15,9 @@ export default function FloatingQRWidget() {
     >
       <div className="p-2 rounded-xl bg-white">
         <QRCodeSVG
+          title="Scan to open Synapse on your phone"
+          role="img"
+          aria-label="Scan to open Synapse on your phone"
           value={qrValue}
           size={72}
           level="H"
