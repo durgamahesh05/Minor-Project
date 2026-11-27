@@ -5,6 +5,22 @@ from typing import Literal
 
 ResponseLevel = Literal["auto", "simple", "detailed", "deep"]
 LIMITS = {"simple": 500, "detailed": 2000, "deep": 5000}
+# UI languages (frontend i18n codes) that answers can be written in.
+LANGUAGE_NAMES = {"en": "English", "hi": "Hindi", "te": "Telugu", "es": "Spanish", "fr": "French"}
+
+
+def language_name(language: str | None) -> str | None:
+    """Return the language to answer in, or None to follow the user's own language."""
+    code = (language or "auto").strip().lower().replace("_", "-").split("-")[0]
+    return LANGUAGE_NAMES.get(code)
+
+
+def language_instruction(language: str | None) -> str:
+    name = language_name(language)
+    if name:
+        return (f"Write the entire response in {name}, even when the question or the source material is in another language. "
+                "Keep citations, file names, code, formulas and proper nouns unchanged.")
+    return "Reply in the same language the user writes in."
 
 
 @dataclass(frozen=True)
@@ -13,7 +29,7 @@ class ResponsePolicy:
     instruction: str
 
 
-def response_policy(message: str, selected: ResponseLevel = "simple") -> ResponsePolicy:
+def response_policy(message: str, selected: ResponseLevel = "simple", language: str | None = None) -> ResponsePolicy:
     text = message.lower()
     explicit = None
     # Later explicit preferences win when a user revises their instruction.
@@ -48,4 +64,5 @@ def response_policy(message: str, selected: ResponseLevel = "simple") -> Respons
                 budget = min(5000, max(128, count * 100))
                 instruction += f" Use {count} newline-separated lines (not visual wrapping); no extra introduction or conclusion. Respect any maximum qualifier."
     instruction += f" Output budget: at most {budget} tokens. Be concise within this cap; do not treat it as a target."
+    instruction += " " + language_instruction(language)
     return ResponsePolicy(budget, instruction)

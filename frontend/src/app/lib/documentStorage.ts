@@ -141,21 +141,33 @@ export async function downloadLocalDocument(document: Pick<Document, "clientDocu
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export async function chooseDocumentFile(): Promise<File | undefined> {
+const PICKER_MIME_TYPES: Record<string, string> = {
+  ".pdf": "application/pdf",
+  ".doc": "application/msword",
+  ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ".rtf": "application/rtf",
+  ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ".xls": "application/vnd.ms-excel",
+};
+
+function pickerAccept(extensions: string[]) {
+  const accept: Record<string, string[]> = {};
+  for (const extension of extensions) {
+    // The picker needs a valid MIME key; it filters on the listed extensions.
+    const mime = PICKER_MIME_TYPES[extension] ?? (/\.(bmp|gif|jpe?g|png|tiff?|webp)$/.test(extension) ? "image/*" : "text/plain");
+    (accept[mime] ??= []).push(extension);
+  }
+  return accept;
+}
+
+/** Opens the native picker where available; returns undefined to fall back to <input type="file">. */
+export async function chooseDocumentFiles(extensions: string[], multiple = true): Promise<File[] | undefined> {
   const picker = (window as Window & { showOpenFilePicker?: (options: object) => Promise<FileSystemFileHandle[]> }).showOpenFilePicker;
   if (!picker) return undefined;
-  const [handle] = await picker.call(window, {
-    multiple: false,
-    types: [{
-      description: "Study documents",
-      accept: {
-        "application/pdf": [".pdf"],
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"],
-        "application/vnd.openxmlformats-officedocument.presentationml.presentation": [".pptx"],
-        "text/plain": [".txt"],
-        "image/*": [".png", ".jpg", ".jpeg", ".webp"],
-      },
-    }],
+  const handles = await picker.call(window, {
+    multiple,
+    types: [{ description: "Study documents", accept: pickerAccept(extensions) }],
   });
-  return handle?.getFile();
+  return Promise.all(handles.map(handle => handle.getFile()));
 }

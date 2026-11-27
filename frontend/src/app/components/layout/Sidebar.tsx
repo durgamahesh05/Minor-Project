@@ -1,5 +1,5 @@
-import { useState, type ReactNode } from "react";
-import { useLocation, Link } from "react-router";
+import { useEffect, useState, type ReactNode } from "react";
+import { useLocation, useNavigate, Link } from "react-router";
 import {
   Brain,
   Menu,
@@ -75,17 +75,30 @@ type Props = {
 };
 
 const PRIMARY_NAV = [
-  { to: "/chat", label: "Chat", icon: MessageSquare },
-  { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { to: "/quiz", label: "Quiz", icon: ListChecks },
-  { to: "/flashcards", label: "Flashcards", icon: Layers },
+  { to: "/chat", label: "chat", icon: MessageSquare },
+  { to: "/dashboard", label: "nav.dashboard", icon: LayoutDashboard },
+  { to: "/quiz", label: "nav.quiz", icon: ListChecks },
+  { to: "/flashcards", label: "nav.flashcards", icon: Layers },
 ];
 
 export default function Sidebar({ c, open, onClose, user, onLogout, children }: Props) {
   const { t } = useTranslation();
   const location = useLocation();
   const { theme, toggleTheme } = useTheme();
+  const navigate = useNavigate();
+  // The account-deletion email links to /chat?confirmDeletion=<code>.
+  const [deleteCode, setDeleteCode] = useState<string | undefined>();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const code = params.get("confirmDeletion");
+    if (!code || !user) return;
+    setDeleteCode(code);
+    setSettingsOpen(true);
+    params.delete("confirmDeletion");
+    const rest = params.toString();
+    navigate({ pathname: location.pathname, search: rest ? `?${rest}` : "" }, { replace: true });
+  }, [location.pathname, location.search, navigate, user]);
   const [helpOpen, setHelpOpen] = useState(false);
 
   return (
@@ -103,22 +116,22 @@ export default function Sidebar({ c, open, onClose, user, onLogout, children }: 
             Synapse
           </span>
         </div>
-        <button onClick={onClose} className="p-1.5 rounded-lg transition-colors hover:opacity-70" style={{ color: c.sbText }} title="Close sidebar">
+        <button onClick={onClose} className="p-1.5 rounded-lg transition-colors hover:opacity-70" style={{ color: c.sbText }} title={t("nav.closeSidebar")}>
           <Menu size={16} strokeWidth={1.5} />
         </button>
       </div>
 
       <div className="px-3 shrink-0 space-y-0.5">
         {PRIMARY_NAV.map(item => (
-          <NavItem key={item.to} c={c} icon={item.icon} label={item.to === "/chat" ? t("chat") : item.label} to={item.to} active={location.pathname === item.to} />
+          <NavItem key={item.to} c={c} icon={item.icon} label={t(item.label)} to={item.to} active={location.pathname === item.to} />
         ))}
         {user?.role === "admin" && (
-          <NavItem c={c} icon={ShieldCheck} label="Admin" to="/admin" active={location.pathname === "/admin"} />
+          <NavItem c={c} icon={ShieldCheck} label={t("nav.admin")} to="/admin" active={location.pathname === "/admin"} />
         )}
       </div>
 
       {children && (
-        <nav aria-label="Chat history" className="sidebar-scrollbar flex-1 min-h-0 px-3 py-2 overflow-y-auto overflow-x-hidden overscroll-contain space-y-0.5" style={{ borderTop: `1px solid ${c.sbBorder}`, marginTop: 8, scrollbarColor: `${c.sbText} transparent`, scrollbarWidth: "thin", scrollbarGutter: "stable" }}>
+        <nav aria-label={t("nav.chatHistory")} className="sidebar-scrollbar flex-1 min-h-0 px-3 py-2 overflow-y-auto overflow-x-hidden overscroll-contain space-y-0.5" style={{ borderTop: `1px solid ${c.sbBorder}`, marginTop: 8, scrollbarColor: `${c.sbText} transparent`, scrollbarWidth: "thin", scrollbarGutter: "stable" }}>
           {children}
         </nav>
       )}
@@ -129,7 +142,7 @@ export default function Sidebar({ c, open, onClose, user, onLogout, children }: 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
-                aria-label="Open profile menu"
+                aria-label={t("nav.openProfileMenu")}
                 className="flex w-full items-center gap-3 rounded-xl p-3 text-left transition-colors hover:bg-[var(--profile-hover)] data-[state=open]:bg-[var(--profile-hover)] focus-visible:outline-2 focus-visible:outline-offset-2"
                 style={{ color: c.sbFg, "--profile-hover": c.sbHover } as React.CSSProperties}
               >
@@ -158,11 +171,11 @@ export default function Sidebar({ c, open, onClose, user, onLogout, children }: 
               <DropdownMenuSeparator style={{ background: c.sbBorder }} />
               <DropdownMenuItem className="rounded-lg px-3 py-2.5" onSelect={toggleTheme}>
                 {theme === "dark" ? <Sun /> : <Moon />}
-                {theme === "dark" ? "Light mode" : "Dark mode"}
+                {theme === "dark" ? t("nav.lightMode") : t("nav.darkMode")}
               </DropdownMenuItem>
               {user.role !== "admin" && (
                 <DropdownMenuItem asChild className="rounded-lg px-3 py-2.5">
-                  <Link to="/pricing"><CreditCard /> See plans and pricing</Link>
+                  <Link to="/pricing"><CreditCard /> {t("nav.plans")}</Link>
                 </DropdownMenuItem>
               )}
               <DropdownMenuItem className="rounded-lg px-3 py-2.5" onSelect={() => setSettingsOpen(true)}>
@@ -179,23 +192,23 @@ export default function Sidebar({ c, open, onClose, user, onLogout, children }: 
           </DropdownMenu>
         ) : (
           <div>
-            <NavItem c={c} icon={theme === "dark" ? Sun : Moon} label={theme === "dark" ? "Light mode" : "Dark mode"} onClick={toggleTheme} />
-            <NavItem c={c} icon={CreditCard} label="See plans and pricing" to="/pricing" />
+            <NavItem c={c} icon={theme === "dark" ? Sun : Moon} label={theme === "dark" ? t("nav.lightMode") : t("nav.darkMode")} onClick={toggleTheme} />
+            <NavItem c={c} icon={CreditCard} label={t("nav.plans")} to="/pricing" />
             <NavItem c={c} icon={Settings} label={t("settings")} onClick={() => setSettingsOpen(true)} />
             <NavItem c={c} icon={HelpCircle} label={t("help")} onClick={() => setHelpOpen(true)} />
           <div className="mt-2 rounded-2xl p-4" style={{ background: c.ctaBg, border: `1px solid ${c.ctaBorder}` }}>
             <p className="text-[13px] font-semibold mb-1 leading-snug" style={{ color: c.sbFg, ...JK }}>
-              Get responses tailored to you
+              {t("nav.guestTitle")}
             </p>
             <p className="text-[11px] leading-relaxed mb-3 font-mono" style={{ color: c.sbText }}>
-              Log in to get answers based on saved chats, upload files, and track your progress.
+              {t("nav.guestBody")}
             </p>
           </div>
           </div>
         )}
       </div>
 
-      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <SettingsDialog open={settingsOpen} onOpenChange={open => { setSettingsOpen(open); if (!open) setDeleteCode(undefined); }} initialDeleteCode={deleteCode} />
       <HelpDialog open={helpOpen} onOpenChange={setHelpOpen} />
     </aside>
   );

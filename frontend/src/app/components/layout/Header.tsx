@@ -3,6 +3,7 @@ import { Menu, ChevronDown } from "lucide-react";
 import type { ThemeColors } from "../../lib/theme";
 import { JK } from "../../lib/theme";
 import type { User } from "../../lib/api";
+import { useTranslation } from "react-i18next";
 
 type Props = {
   c: ThemeColors;
@@ -12,11 +13,12 @@ type Props = {
 };
 
 export default function Header({ c, sidebarOpen, onOpenSidebar, user }: Props) {
+  const { t } = useTranslation();
   return (
     <header className="flex items-center justify-between px-5 h-14 flex-shrink-0" style={{ borderBottom: `1px solid ${c.hdrBorder}` }}>
       <div className="flex items-center gap-2">
         {!sidebarOpen && (
-          <button onClick={onOpenSidebar} className="p-1.5 rounded-lg transition-colors hover:opacity-70 mr-1" style={{ color: c.mainSub }} title="Open sidebar">
+          <button onClick={onOpenSidebar} className="p-1.5 rounded-lg transition-colors hover:opacity-70 mr-1" style={{ color: c.mainSub }} title={t("nav.openSidebar")}>
             <Menu size={16} strokeWidth={1.5} />
           </button>
         )}
@@ -33,14 +35,14 @@ export default function Header({ c, sidebarOpen, onOpenSidebar, user }: Props) {
             className="px-4 py-1.5 rounded-full text-[13px] font-semibold border transition-opacity hover:opacity-80"
             style={{ color: c.mainFg, borderColor: c.hdrBorder, background: "transparent" }}
           >
-            Log in
+            {t("nav.login")}
           </Link>
           <Link
             to="/register"
             className="px-4 py-1.5 rounded-full text-[13px] font-semibold transition-opacity hover:opacity-85"
             style={{ background: c.loginBtn, color: c.loginBtnText }}
           >
-            Sign up for free
+            {t("nav.signup")}
           </Link>
         </div>
       )}

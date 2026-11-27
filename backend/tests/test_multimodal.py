@@ -86,3 +86,25 @@ def test_scanned_pdf_opens_renderer_once(monkeypatch):
     elements = extract_elements("scan.pdf", content.getvalue())
     assert len([element for element in elements if element.kind == "image"]) == 3
     constructor.assert_called_once()
+
+
+def test_repeated_pdf_images_are_ocr_scanned_once(monkeypatch):
+    from ingestion import multimodal
+    calls = []
+    monkeypatch.setattr(multimodal, "extract_image_text", lambda content: calls.append(content) or "Logo text")
+    images = [multimodal._element("image", "YQ==", page=page, mime_type="image/jpeg") for page in (1, 2, 3)]
+    results = multimodal._append_pdf_ocr(images)
+    assert len(calls) == 1
+    ocr = [element for element in results if element.kind == "text"]
+    assert [element.metadata["page"] for element in ocr] == [1, 2, 3]
+    assert len({element.id for element in ocr}) == 3
+
+
+def test_decorative_images_are_skipped_but_regular_images_are_kept():
+    from ingestion import multimodal
+    line = BytesIO()
+    Image.new("RGB", (400, 2), "black").save(line, "PNG")
+    with pytest.raises(ValueError):
+        multimodal._normalized_image(line.getvalue(), skip_decorative=True)
+    # Standalone image uploads still accept any size.
+    assert multimodal._normalized_image(line.getvalue())[1] == "image/jpeg"

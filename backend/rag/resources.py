@@ -1,6 +1,6 @@
 """Lazy, reusable I/O resources with explicit shutdown."""
+import os
 from concurrent.futures import ThreadPoolExecutor
-from itertools import islice
 from threading import Lock
 from typing import Callable, Iterable, TypeVar
 
@@ -11,7 +11,12 @@ R = TypeVar("R")
 
 
 class IOResources:
-    def __init__(self, workers: int = 3):
+    def __init__(self, workers: int | None = None):
+        if workers is None:
+            try:
+                workers = int(os.getenv("RAG_IO_WORKERS", "6"))
+            except ValueError:
+                workers = 6
         self._workers = max(1, workers)
         self._lock = Lock()
         self._client = None
@@ -28,21 +33,24 @@ class IOResources:
             return self._client
 
     def map(self, function: Callable[[T], R], items: Iterable[T]) -> list[R]:
-        """Keep order and submit only one worker-sized batch at a time."""
-        iterator = iter(items)
-        results = []
-        while batch := list(islice(iterator, self._workers)):
-            with self._lock:
-                if self._executor is None:
-                    self._executor = ThreadPoolExecutor(max_workers=self._workers, thread_name_prefix="rag-io")
-                futures = [self._executor.submit(function, item) for item in batch]
-            try:
-                results.extend(future.result() for future in futures)
-            except Exception:
-                for future in futures:
-                    future.cancel()
-                raise
-        return results
+        """Keep order; the pool runs at most `workers` calls at once.
+
+        Work is queued up front so a worker starts the next item as soon as it
+        finishes one, instead of waiting for the slowest call in a batch.
+        """
+        items = list(items)
+        if not items:
+            return []
+        with self._lock:
+            if self._executor is None:
+                self._executor = ThreadPoolExecutor(max_workers=self._workers, thread_name_prefix="rag-io")
+            futures = [self._executor.submit(function, item) for item in items]
+        try:
+            return [future.result() for future in futures]
+        except Exception:
+            for future in futures:
+                future.cancel()
+            raise
 
     def close(self) -> None:
         with self._lock:

@@ -1,13 +1,13 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import { api, ApiError, type User } from "../lib/api";
+import { api, ApiError, type OtpResult, type User } from "../lib/api";
 
 type AuthContextValue = {
   user: User | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<User>;
-  register: (name: string, email: string, password: string) => Promise<string | undefined>;
+  register: (name: string, email: string, password: string) => Promise<OtpResult>;
   verifyRegistration: (email: string, otp: string) => Promise<User>;
-  resendRegistrationOtp: (email: string) => Promise<string | undefined>;
+  resendRegistrationOtp: (email: string) => Promise<OtpResult>;
   logout: () => Promise<void>;
 };
 
@@ -55,8 +55,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // no account exists and no session starts yet. verifyRegistration()
   // finishes the job once the code is confirmed.
   const register = async (name: string, email: string, password: string) => {
-    const result = await api.register(name, email, password);
-    return result.otp;
+    return api.register(name, email, password);
   };
 
   const verifyRegistration = async (email: string, otp: string) => {
@@ -69,8 +68,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const resendRegistrationOtp = async (email: string) => {
-    const result = await api.resendRegistrationOtp(email);
-    return result.otp;
+    return api.resendRegistrationOtp(email);
   };
 
   const logout = async () => {

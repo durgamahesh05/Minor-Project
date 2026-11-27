@@ -43,7 +43,7 @@ export default function MessageList({ c, messages, isTyping }: Props) {
                     to={action.id ? `/${action.kind}/${action.id}` : `/${action.kind}`}
                     className="inline-flex mt-3 mr-3 rounded-full px-4 py-2 text-sm font-semibold"
                     style={{ background: "#7c5af0", color: "white" }}>
-                    {action.id ? (action.kind === "quiz" ? "Start quiz" : "Study flashcards") : (action.kind === "quiz" ? "Open quiz dashboard" : "Open flashcards dashboard")}
+                    {action.id ? (action.kind === "quiz" ? t("chatPage.startQuiz") : t("chatPage.studyFlashcards")) : (action.kind === "quiz" ? t("chatPage.openQuizDashboard") : t("chatPage.openFlashcardsDashboard"))}
                   </Link>
                 ))}
               </div>
@@ -61,7 +61,7 @@ export default function MessageList({ c, messages, isTyping }: Props) {
             <Brain size={14} strokeWidth={2} className="text-white" />
           </div>
           <div role="status" className="flex items-center gap-1.5 py-3">
-            <span className="mr-2 text-xs" style={{ color: c.mainSub }}>Preparing your answer</span>
+            <span className="mr-2 text-xs" style={{ color: c.mainSub }}>{t("chatPage.preparingAnswer")}</span>
             {[0, 1, 2].map(j => (
               <span
                 key={j}

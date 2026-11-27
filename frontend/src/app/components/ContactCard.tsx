@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { Check, ArrowRight } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 const JK = { fontFamily: "'Plus Jakarta Sans', sans-serif" };
 
 export default function ContactCard() {
+  const { t } = useTranslation();
   const [submitted, setSubmitted] = useState(false);
   const [form, setForm] = useState({ name: "", email: "", message: "" });
 
@@ -21,22 +23,22 @@ export default function ContactCard() {
           >
             <Check size={22} strokeWidth={1.5} className="text-[#a78bfa]" />
           </div>
-          <h3 className="text-[22px] font-bold text-white" style={JK}>Message sent!</h3>
-          <p className="text-[14px] text-[#8a9ab8] max-w-[260px]">We'll get back to you within 24 hours.</p>
+          <h3 className="text-[22px] font-bold text-white" style={JK}>{t("contact.sent")}</h3>
+          <p className="text-[14px] text-[#8a9ab8] max-w-[260px]">{t("contact.reply")}</p>
           <button
             onClick={() => { setSubmitted(false); setForm({ name: "", email: "", message: "" }); }}
             className="text-[13px] text-[#b39afa] hover:text-[#a78bfa] transition-colors font-mono mt-1"
           >
-            Send another →
+            {t("contact.another")}
           </button>
         </div>
       ) : (
         <div className="space-y-5">
-          <h3 className="text-[19px] font-bold text-white mb-6" style={JK}>Send us a message</h3>
+          <h3 className="text-[19px] font-bold text-white mb-6" style={JK}>{t("contact.title")}</h3>
 
           {[
-            { label: "Full name", key: "name", type: "text", ph: "Alex Chen" },
-            { label: "Email address", key: "email", type: "email", ph: "alex@university.edu" },
+            { label: t("contact.fullName"), key: "name", type: "text", ph: "Alex Chen" },
+            { label: t("contact.email"), key: "email", type: "email", ph: "alex@university.edu" },
           ].map(f => (
             <div key={f.key}>
               <label htmlFor={`contact-${f.key}`} className="text-[10px] font-mono uppercase tracking-[0.1em] text-[#93a3bf] mb-1.5 block">
@@ -55,11 +57,11 @@ export default function ContactCard() {
           ))}
 
           <div>
-            <label htmlFor="contact-message" className="text-[10px] font-mono uppercase tracking-[0.1em] text-[#93a3bf] mb-1.5 block">Message</label>
+            <label htmlFor="contact-message" className="text-[10px] font-mono uppercase tracking-[0.1em] text-[#93a3bf] mb-1.5 block">{t("contact.message")}</label>
             <textarea
               id="contact-message"
               rows={4}
-              placeholder="Tell us how we can help…"
+              placeholder={t("contact.messagePlaceholder")}
               value={form.message}
               onChange={e => setForm(prev => ({ ...prev, message: e.target.value }))}
               className="w-full rounded-xl px-4 py-2.5 text-[13px] text-[#e2e6f0] placeholder:text-[#93a3bf] focus:outline-none focus:ring-1 focus:ring-[#7c5af0]/30 transition-colors resize-none"
@@ -72,7 +74,7 @@ export default function ContactCard() {
             className="w-full py-3 rounded-xl text-[14px] font-semibold text-white bg-[#7c5af0] hover:bg-[#6d4de0] transition-colors flex items-center justify-center gap-2"
             style={JK}
           >
-            Send message <ArrowRight size={14} strokeWidth={2} />
+            {t("contact.send")} <ArrowRight size={14} strokeWidth={2} />
           </button>
         </div>
       )}

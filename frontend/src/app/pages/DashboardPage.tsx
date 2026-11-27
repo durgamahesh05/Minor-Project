@@ -1,9 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, Link } from "react-router";
+import { useTranslation } from "react-i18next";
+import { studyCache } from "../lib/studyCache";
+import { useLanguage } from "../context/LanguageContext";
 import { FileText, Upload, Trash2, Download, ListChecks, Layers } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
-import { api, ApiError, type Document } from "../lib/api";
-import { beginLocalDocument, chooseDocumentFile, deleteLocalDocument, downloadLocalDocument, markLocalDocumentIndexed } from "../lib/documentStorage";
+import { api, type Document } from "../lib/api";
+import { beginLocalDocument, chooseDocumentFiles, deleteLocalDocument, downloadLocalDocument, markLocalDocumentIndexed } from "../lib/documentStorage";
+import { formatList, runWithConcurrency, useUploadConfig, validateFiles } from "../lib/uploadConfig";
 import { getThemeColors, JK } from "../lib/theme";
 import { useTheme } from "../context/ThemeContext";
 import Sidebar from "../components/layout/Sidebar";
@@ -15,17 +19,25 @@ function formatSize(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+
 export default function DashboardPage() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const { t } = useTranslation();
+  const { language } = useLanguage();
+  const cacheUser = user?.id ?? "anonymous";
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { theme } = useTheme();
   const [sidebarOpen, setSidebarOpen] = useState(() => window.matchMedia("(min-width: 768px)").matches);
-  const [documents, setDocuments] = useState<Document[]>([]);
-  const [counts, setCounts] = useState({ quizzes: 0, flashcards: 0 });
-  const [loading, setLoading] = useState(true);
+  // Paint the last known data immediately; the server response replaces it.
+  const [documents, setDocuments] = useState<Document[]>(() => studyCache.documents(cacheUser) ?? []);
+  const [counts, setCounts] = useState(() => ({ quizzes: studyCache.list(cacheUser, "quiz")?.length ?? 0, flashcards: studyCache.list(cacheUser, "flashcards")?.length ?? 0 }));
+  const [loading, setLoading] = useState(() => !studyCache.documents(cacheUser));
+  const [loadFailed, setLoadFailed] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState({ done: 0, total: 0 });
+  const uploadConfig = useUploadConfig();
   const [error, setError] = useState<string | null>(null);
   const [busyDocId, setBusyDocId] = useState<string | null>(null);
 
@@ -37,8 +49,14 @@ export default function DashboardPage() {
         // Server indexing status remains authoritative across browsers/restarts.
         setDocuments(documents);
         setCounts({ quizzes: quizzes.length, flashcards: sets.length });
+        studyCache.setDocuments(cacheUser, documents);
+        studyCache.setList(cacheUser, "quiz", quizzes);
+        studyCache.setList(cacheUser, "flashcards", sets);
       })
-      .catch(error => setError(error instanceof Error ? error.message : "Unable to load your dashboard."))
+      .catch(error => {
+        setLoadFailed(true);
+        setError(error instanceof Error ? error.message : t("dashboard.loadError"));
+      })
       .finally(() => setLoading(false));
   }, []);
 
@@ -47,37 +65,48 @@ export default function DashboardPage() {
     navigate("/login");
   };
 
-  const handleFileChosen = async (file: File | undefined) => {
-    if (!file) return;
+  const handleFilesChosen = async (files: File[]) => {
+    if (!files.length || uploading) return;
     setError(null);
-    if (file.size > 10 * 1024 * 1024) {
-      setError("Files must be 10 MB or smaller.");
+    // The library has no per-message attachment cap; only size and type apply.
+    const invalid = validateFiles(files, { ...uploadConfig, maxAttachments: Number.MAX_SAFE_INTEGER });
+    if (invalid) {
+      setError(invalid);
       if (fileInputRef.current) fileInputRef.current.value = "";
       return;
     }
     setUploading(true);
-    let clientDocumentId: string | undefined;
+    setUploadProgress({ done: 0, total: files.length });
+    const errors: string[] = [];
     try {
-      clientDocumentId = await beginLocalDocument(file);
-      const { document } = await api.uploadDocument(file, clientDocumentId);
-      await markLocalDocumentIndexed(document);
-      setDocuments(prev => [document, ...prev]);
-    } catch (err) {
-      if (clientDocumentId) await deleteLocalDocument(clientDocumentId).catch(() => {});
-      setError(err instanceof ApiError ? err.message : "Upload failed");
+      await runWithConcurrency(files, uploadConfig.uploadConcurrency, async file => {
+        let clientDocumentId: string | undefined;
+        try {
+          clientDocumentId = await beginLocalDocument(file);
+          const { document } = await api.uploadDocument(file, clientDocumentId);
+          await markLocalDocumentIndexed(document);
+          setDocuments(prev => [document, ...prev]);
+        } catch (err) {
+          if (clientDocumentId) await deleteLocalDocument(clientDocumentId).catch(() => {});
+          errors.push(`${file.name}: ${err instanceof Error ? err.message : t("composer.uploadFailed")}`);
+        } finally {
+          setUploadProgress(progress => ({ ...progress, done: progress.done + 1 }));
+        }
+      });
     } finally {
       setUploading(false);
+      if (errors.length) setError(errors.join("\n"));
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
   const handleChooseFile = async () => {
     try {
-      const file = await chooseDocumentFile();
-      if (file) await handleFileChosen(file);
+      const files = await chooseDocumentFiles(uploadConfig.extensions);
+      if (files) await handleFilesChosen(files);
       else fileInputRef.current?.click();
     } catch (error) {
-      if (!(error instanceof DOMException && error.name === "AbortError")) setError("Unable to open the file picker.");
+      if (!(error instanceof DOMException && error.name === "AbortError")) setError(t("dashboard.pickerError"));
     }
   };
 
@@ -89,10 +118,10 @@ export default function DashboardPage() {
       const document = documents.find(item => item.id === id);
       setDocuments(prev => prev.filter(d => d.id !== id));
       await deleteLocalDocument(document?.clientDocumentId).catch(() => {
-        setError("Document deleted, but its browser copy could not be removed.");
+        setError(t("dashboard.deleteLocalError"));
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to delete document. Please try again.");
+      setError(err instanceof Error ? err.message : t("dashboard.deleteError"));
     } finally {
       setBusyDocId(null);
     }
@@ -104,7 +133,7 @@ export default function DashboardPage() {
       if (document.storageProvider === "browser-opfs") await downloadLocalDocument(document);
       else window.open(api.documentDownloadUrl(document.id), "_blank", "noopener,noreferrer");
     } catch {
-      setError("The original file is not available in this browser.");
+      setError(t("dashboard.downloadError"));
     }
   };
 
@@ -112,10 +141,11 @@ export default function DashboardPage() {
     setError(null);
     setBusyDocId(documentId);
     try {
-      const { quiz } = await api.createQuiz(documentId);
-      navigate(`/quiz/${quiz.id}`);
+      const { quiz } = await api.createQuiz(documentId, { language });
+      studyCache.added(cacheUser, "quiz", quiz);
+      navigate(`/quiz/${quiz.id}`, { state: { item: quiz } });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to generate quiz.");
+      setError(err instanceof Error ? err.message : t("dashboard.quizError"));
     } finally {
       setBusyDocId(null);
     }
@@ -125,10 +155,11 @@ export default function DashboardPage() {
     setError(null);
     setBusyDocId(documentId);
     try {
-      const { set } = await api.createFlashcardSet(documentId);
-      navigate(`/flashcards/${set.id}`);
+      const { set } = await api.createFlashcardSet(documentId, { language });
+      studyCache.added(cacheUser, "flashcards", set);
+      navigate(`/flashcards/${set.id}`, { state: { item: set } });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to generate flashcards.");
+      setError(err instanceof Error ? err.message : t("dashboard.flashcardsError"));
     } finally {
       setBusyDocId(null);
     }
@@ -152,18 +183,20 @@ export default function DashboardPage() {
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
                 <h1 className="text-[22px] font-semibold" style={{ color: c.mainFg, ...JK }}>
-                  Your documents
+                  {t("dashboard.title")}
                 </h1>
                 <p className="text-[13px] mt-1" style={{ color: c.mainSub }}>
-                  Upload files up to 10 MB, then generate quizzes and flashcards from supported study materials.
+                  {t("dashboard.subtitle", { formats: formatList(uploadConfig), size: uploadConfig.maxFileSizeMb })}
                 </p>
               </div>
               <div>
                 <input
                   ref={fileInputRef}
                   type="file"
+                  multiple
+                  accept={uploadConfig.accept}
                   className="hidden"
-                  onChange={e => handleFileChosen(e.target.files?.[0])}
+                  onChange={e => { void handleFilesChosen(Array.from(e.target.files ?? [])); }}
                 />
                 <button
                   onClick={handleChooseFile}
@@ -172,22 +205,22 @@ export default function DashboardPage() {
                   style={{ background: "#7c5af0", color: "#ffffff" }}
                 >
                   <Upload size={14} strokeWidth={2} />
-                  {uploading ? "Uploading…" : "Upload document"}
+                  {uploading ? (uploadProgress.total > 1 ? t("dashboard.uploadingCount", { done: uploadProgress.done, total: uploadProgress.total }) : t("dashboard.uploading")) : t("dashboard.uploadDocuments")}
                 </button>
               </div>
             </div>
 
-            {!loading && !error && <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div className="rounded-xl border p-4" style={{ borderColor: c.chipBorder, color: c.mainFg }}>{documents.length} documents</div>
-              <Link to="/quiz" className="rounded-xl border p-4" style={{ borderColor: c.chipBorder, color: c.mainFg }}>{counts.quizzes} quizzes</Link>
-              <Link to="/flashcards" className="rounded-xl border p-4" style={{ borderColor: c.chipBorder, color: c.mainFg }}>{counts.flashcards} flashcard sets</Link>
+            {!loading && !loadFailed && <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="rounded-xl border p-4" style={{ borderColor: c.chipBorder, color: c.mainFg }}>{t("dashboard.documents", { count: documents.length })}</div>
+              <Link to="/quiz" className="rounded-xl border p-4" style={{ borderColor: c.chipBorder, color: c.mainFg }}>{t("dashboard.quizzes", { count: counts.quizzes })}</Link>
+              <Link to="/flashcards" className="rounded-xl border p-4" style={{ borderColor: c.chipBorder, color: c.mainFg }}>{t("dashboard.flashcardSets", { count: counts.flashcards })}</Link>
             </div>}
-            {busyDocId && <p role="status" className="text-sm" style={{ color: c.mainSub }}>Working on your document?</p>}
-            {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+            {busyDocId && <p role="status" className="text-sm" style={{ color: c.mainSub }}>{t("dashboard.working")}</p>}
+            {error && <p role="alert" className="text-sm text-destructive whitespace-pre-line">{error}</p>}
 
             {loading ? (
               <p className="text-sm" style={{ color: c.mainSub }}>
-                Loading…
+                {t("loading")}
               </p>
             ) : documents.length === 0 ? (
               <div
@@ -196,7 +229,7 @@ export default function DashboardPage() {
               >
                 <FileText size={28} strokeWidth={1.5} style={{ color: c.mainSub, margin: "0 auto" }} />
                 <p className="text-sm mt-3" style={{ color: c.mainSub }}>
-                  No documents yet. Upload a file up to 10 MB to get started.
+                  {t("dashboard.empty", { size: uploadConfig.maxFileSizeMb })}
                 </p>
               </div>
             ) : (
@@ -213,12 +246,12 @@ export default function DashboardPage() {
                         {doc.originalName}
                       </p>
                       <p className="text-[11px] font-mono" style={{ color: c.mainSub }}>
-                        {doc.status} | {formatSize(doc.size)} · {new Date(doc.createdAt).toLocaleDateString()}
+                        {t("dashboard.status." + doc.status, { defaultValue: doc.status })} | {formatSize(doc.size)} · {new Date(doc.createdAt).toLocaleDateString(language === "auto" ? undefined : language)}
                       </p>
                     </div>
                     <div className="flex items-center gap-1 flex-shrink-0">
                       <button
-                        title="Generate quiz"
+                        title={t("dashboard.generateQuiz")}
                         disabled={busyDocId !== null || doc.status !== "indexed"}
                         onClick={() => handleGenerateQuiz(doc.id)}
                         className="p-2 rounded-lg transition-opacity hover:opacity-70 disabled:opacity-40"
@@ -227,7 +260,7 @@ export default function DashboardPage() {
                         <ListChecks size={16} strokeWidth={1.5} />
                       </button>
                       <button
-                        title="Generate flashcards"
+                        title={t("dashboard.generateFlashcards")}
                         disabled={busyDocId !== null || doc.status !== "indexed"}
                         onClick={() => handleGenerateFlashcards(doc.id)}
                         className="p-2 rounded-lg transition-opacity hover:opacity-70 disabled:opacity-40"
@@ -236,7 +269,7 @@ export default function DashboardPage() {
                         <Layers size={16} strokeWidth={1.5} />
                       </button>
                       <button
-                        title="Download"
+                        title={t("dashboard.download")}
                         onClick={() => handleDownload(doc)}
                         className="p-2 rounded-lg transition-opacity hover:opacity-70"
                         style={{ color: c.mainSub }}
@@ -244,7 +277,7 @@ export default function DashboardPage() {
                         <Download size={16} strokeWidth={1.5} />
                       </button>
                       <button
-                        title="Delete"
+                        title={t("common.delete")}
                         disabled={busyDocId !== null}
                         onClick={() => handleDelete(doc.id)}
                         className="p-2 rounded-lg transition-opacity hover:opacity-70 disabled:opacity-40"

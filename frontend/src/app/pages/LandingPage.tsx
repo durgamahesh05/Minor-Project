@@ -9,12 +9,15 @@ import { useAuth } from "../context/AuthContext";
 import ContactCard from "../components/ContactCard";
 import PricingCards from "../components/PricingCards";
 import FloatingQRWidget from "../components/FloatingQRWidget";
+import { formatList, useUploadConfig } from "../lib/uploadConfig";
 
 const JK = { fontFamily: "'Plus Jakarta Sans', sans-serif" };
 
 export default function LandingPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const uploadConfig = useUploadConfig();
+  const supportedFormats = formatList(uploadConfig);
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
@@ -63,7 +66,7 @@ export default function LandingPage() {
     {
       icon: Upload,
       title: "Smart Upload",
-      desc: "Drop any PDF, DOCX, or PPTX. Synapse extracts structure, key concepts, and metadata — ready to study in under a minute.",
+      desc: `Drop any ${supportedFormats} file. Synapse extracts structure, key concepts, and metadata — ready to study in under a minute.`,
       color: "#7c5af0",
     },
     {
@@ -102,7 +105,7 @@ export default function LandingPage() {
     {
       n: "01",
       title: "Upload your material",
-      desc: "Drop lecture notes, textbook chapters, research papers, or slides. PDF, DOCX, PPTX, and TXT up to 50 MB — all supported.",
+      desc: `Drop lecture notes, textbook chapters, research papers, or slides. ${supportedFormats} files up to ${uploadConfig.maxFileSizeMb} MB — all supported.`,
     },
     {
       n: "02",

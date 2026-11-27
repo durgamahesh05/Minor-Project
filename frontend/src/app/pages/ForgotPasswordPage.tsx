@@ -1,8 +1,9 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link } from "react-router";
 import { Brain, CheckCircle2 } from "lucide-react";
 import { api, ApiError } from "../lib/api";
 import { isValidPassword, PASSWORD_REQUIREMENTS_MESSAGE } from "../lib/validatePassword";
+import { clearLinkParams, formatTime, OTP_LENGTH, otpInputProps, readLinkParams, useOtpTimers } from "../lib/otp";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { PasswordInput } from "../components/PasswordInput";
@@ -10,51 +11,62 @@ import { Label } from "../components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card";
 
 type Step = "email" | "otp" | "password" | "success";
-const formatTime = (seconds: number) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+const LINK_KEYS = ["email", "code"];
 
 export default function ForgotPasswordPage() {
-  const [step, setStep] = useState<Step>("email");
-  const [email, setEmail] = useState("");
-  const [otp, setOtp] = useState("");
+  // The "Reset Password" email link lands here with the email and code filled in.
+  const [link] = useState(() => readLinkParams(LINK_KEYS));
+  const fromLink = Boolean(link.email && link.code);
+  const [step, setStep] = useState<Step>(fromLink ? "otp" : "email");
+  const [email, setEmail] = useState(link.email ?? "");
+  const [otp, setOtp] = useState(link.code?.replace(/\D/g, "").slice(0, OTP_LENGTH) ?? "");
   const [token, setToken] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [expiresIn, setExpiresIn] = useState(0);
-  const [resendIn, setResendIn] = useState(0);
   const [devOtp, setDevOtp] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-
-  useEffect(() => {
-    if (step !== "otp") return;
-    const timer = window.setInterval(() => {
-      setExpiresIn(value => Math.max(0, value - 1));
-      setResendIn(value => Math.max(0, value - 1));
-    }, 1000);
-    return () => window.clearInterval(timer);
-  }, [step]);
+  const timers = useOtpTimers();
+  const verifying = useRef(false);
+  const lastTried = useRef("");
 
   const requestOtp = async (event: FormEvent) => {
     event.preventDefault(); setError(null); setSubmitting(true);
     try {
       const result = await api.forgotPassword(email);
-      setExpiresIn(result.expiresIn); setResendIn(result.resendCooldown); setDevOtp(result.otp ?? null); setStep("otp");
+      timers.start(result); setDevOtp(result.otp ?? null); setOtp(""); lastTried.current = ""; setStep("otp");
     } catch (err) { setError(err instanceof ApiError ? err.message : "Something went wrong"); }
     finally { setSubmitting(false); }
   };
 
-  const verifyOtp = async (event: FormEvent) => {
-    event.preventDefault(); setError(null); setSubmitting(true);
-    try { const result = await api.verifyPasswordOtp(email, otp); setToken(result.token); setStep("password"); setDevOtp(null); }
+  const verify = async (code: string) => {
+    if (verifying.current || code.length !== OTP_LENGTH) return;
+    verifying.current = true; lastTried.current = code;
+    setError(null); setSubmitting(true);
+    try { const result = await api.verifyPasswordOtp(email, code); setToken(result.token); setStep("password"); setDevOtp(null); }
     catch (err) { setError(err instanceof ApiError ? err.message : "Something went wrong"); }
-    finally { setSubmitting(false); }
+    finally { verifying.current = false; setSubmitting(false); }
   };
+
+  const verifyOtp = (event: FormEvent) => { event.preventDefault(); void verify(otp); };
+
+  useEffect(() => {
+    clearLinkParams(LINK_KEYS);
+    if (fromLink) void verify(otp);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Submit as soon as the last digit is typed or a code is pasted (once per code).
+  useEffect(() => {
+    if (step === "otp" && otp.length === OTP_LENGTH && otp !== lastTried.current) void verify(otp);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [otp, step]);
 
   const resendOtp = async () => {
     setError(null); setSubmitting(true);
     try {
       const result = await api.resendPasswordOtp(email);
-      setExpiresIn(result.expiresIn); setResendIn(result.resendCooldown); setDevOtp(result.otp ?? null); setOtp("");
+      timers.start(result); setDevOtp(result.otp ?? null); setOtp(""); lastTried.current = "";
     } catch (err) { setError(err instanceof ApiError ? err.message : "Something went wrong"); }
     finally { setSubmitting(false); }
   };
@@ -69,9 +81,10 @@ export default function ForgotPasswordPage() {
     finally { setSubmitting(false); }
   };
 
+  const expired = !fromLink && timers.expiresIn === 0;
   const titles = {
     email: ["Reset your password", "Enter your account email and we'll send a verification code."],
-    otp: ["Verify your email", `Enter the 6-digit code sent to ${email}.`],
+    otp: ["Verify your email", fromLink && submitting ? `Verifying ${email}…` : `Enter the 6-digit code sent to ${email}, or open the link in the email.`],
     password: ["Set a new password", "Choose a new password for your account."],
     success: ["Password Reset Successful", "Your password has been updated successfully."],
   } as const;
@@ -92,11 +105,11 @@ export default function ForgotPasswordPage() {
           </form>}
           {step === "otp" && <form onSubmit={verifyOtp} className="space-y-4">
             {devOtp && <p className="text-xs text-muted-foreground rounded-md border p-2">Development verification code: <span className="font-mono font-semibold text-foreground">{devOtp}</span></p>}
-            <div className="space-y-1.5"><Label htmlFor="otp">Verification code</Label><Input id="otp" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} required autoFocus value={otp} onChange={event => setOtp(event.target.value.replace(/\D/g, ""))} placeholder="6-digit code" /></div>
-            <p className="text-xs text-muted-foreground">{expiresIn > 0 ? `Code expires in ${formatTime(expiresIn)}` : "Code expired. Request a new OTP."}</p>
+            <div className="space-y-1.5"><Label htmlFor="otp">Verification code</Label><Input id="otp" required autoFocus placeholder="6-digit code" {...otpInputProps(otp, setOtp)} /></div>
+            {!fromLink && <p className="text-xs text-muted-foreground" aria-live="polite">{timers.expiresIn > 0 ? `Code expires in ${formatTime(timers.expiresIn)}` : "Code expired. Request a new OTP."}</p>}
             {error && <p className="text-sm text-destructive">{error}</p>}
-            <Button type="submit" className="w-full" disabled={submitting || otp.length !== 6 || expiresIn === 0}>{submitting ? "Verifying…" : "Verify OTP"}</Button>
-            <div className="flex items-center justify-between text-sm"><button type="button" className="underline text-foreground" onClick={() => { setStep("email"); setError(null); }}>Back</button><button type="button" className="underline text-foreground disabled:opacity-50" disabled={submitting || resendIn > 0} onClick={resendOtp}>{resendIn > 0 ? `Resend in ${resendIn}s` : "Resend OTP"}</button></div>
+            <Button type="submit" className="w-full" disabled={submitting || otp.length !== OTP_LENGTH || expired}>{submitting ? "Verifying…" : "Verify OTP"}</Button>
+            <div className="flex items-center justify-between text-sm"><button type="button" className="underline text-foreground" onClick={() => { setStep("email"); setError(null); }}>Back</button><button type="button" className="underline text-foreground disabled:opacity-50" disabled={submitting || timers.resendIn > 0} onClick={resendOtp}>{timers.resendIn > 0 ? `Resend in ${timers.resendIn}s` : "Resend OTP"}</button></div>
           </form>}
           {step === "password" && <form onSubmit={updatePassword} className="space-y-4">
             <div className="space-y-1.5"><Label htmlFor="password">New password</Label><PasswordInput id="password" required minLength={7} autoComplete="new-password" value={password} onChange={event => setPassword(event.target.value)} /></div>
