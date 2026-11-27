@@ -19,11 +19,12 @@ def ensure_indexes(database):
         for keys, options in definitions:
             try:
                 existing_indexes = database[collection].index_information()
-                matching = next((index for index in existing_indexes.values() if list(index["key"]) == keys), None)
+                # index_information() maps each index name to its details.
+                name, matching = next(((name, index) for name, index in existing_indexes.items() if [tuple(key) for key in index["key"]] == keys), (None, None))
                 if matching and all(matching.get(key) == value for key, value in options.items()):
                     continue
-                if matching and matching["name"] != "_id_":
-                    database[collection].drop_index(matching["name"])
+                if matching and name != "_id_":
+                    database[collection].drop_index(name)
                 database[collection].create_index(keys, **options)
             except Exception as error:
-                logging.warning("Index setup for %s failed (%s)", collection, type(error).__name__)
+                logging.warning("Index setup for %s failed (%s: %s)", collection, type(error).__name__, error)

@@ -47,7 +47,7 @@ def warm_up_models():
  try:
   from ingestion.image_reader import ocr_engine
   ocr_engine()
- except Exception as error:logging.warning("OCR engine warm-up skipped (%s)",type(error).__name__)
+ except Exception as error:logging.warning("OCR engine warm-up skipped (%s: %s)",type(error).__name__,error)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -207,7 +207,9 @@ def sync_admin_role(account):
   db.users.update_one({"_id":account["_id"]},{"$set":{"role":"admin","updatedAt":now()}});account["role"]="admin"
  return account
 
-@app.get("/health")
+@app.api_route("/",methods=["GET","HEAD"])
+def root(): return {"service":"synapse-api","status":"ok"}
+@app.api_route("/health",methods=["GET","HEAD"])
 def health(): return {"status":"ok"}
 @app.get("/health/chroma")
 def chroma_health():
