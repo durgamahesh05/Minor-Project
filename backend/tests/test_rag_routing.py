@@ -14,15 +14,15 @@ class Model:
         return Response(self.content)
 
 
-def test_router_sends_casual_chat_to_general():
+def test_router_sends_casual_chat_to_general(monkeypatch):
     rag = MultimodalRAG.__new__(MultimodalRAG)
-    rag.text_model = Model("GENERAL")
+    monkeypatch.setattr(rag, "text_model", Model("GENERAL"), raising=False)
 
     assert rag.route("How are you?") == "GENERAL"
 
 
-def test_router_sends_document_requests_to_rag():
+def test_router_sends_document_requests_to_rag(monkeypatch):
     rag = MultimodalRAG.__new__(MultimodalRAG)
-    rag.text_model = Model("DOCUMENT")
+    monkeypatch.setattr(rag, "text_model", Model("DOCUMENT"), raising=False)
 
     assert rag.route("What does my uploaded PDF say?") == "DOCUMENT"

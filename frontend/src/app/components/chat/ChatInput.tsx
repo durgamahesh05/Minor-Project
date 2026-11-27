@@ -113,8 +113,8 @@ export default function ChatInput({ c, value, onChange, onSend, onDocumentStateC
     if (!files.length || sendBlocked.current) return;
     setAttachmentError(null);
     if (attachmentsRef.current.length + files.length > 5) { setAttachmentError("Attach up to 5 files. Remove a file before adding more."); return; }
-    if (files.some(file => file.size > 20 * 1024 * 1024)) { setAttachmentError("Each file must be 20 MB or smaller."); return; }
-    const supported = /\.(pdf|docx|pptx|xlsx|txt|md|csv|tsv|json|xml|html|htm|log|py|js|ts|css|java|c|cpp|h|yaml|yml|bmp|gif|jpe?g|png|tiff?|webp)$/i;
+    if (files.some(file => file.size > 10 * 1024 * 1024)) { setAttachmentError("Each file must be 10 MB or smaller."); return; }
+    const supported = /\.(pdf|docx|pptx|xlsx|xls|txt|md|csv|tsv|json|xml|html|htm|log|py|js|ts|css|java|c|cpp|h|yaml|yml|bmp|gif|jpe?g|png|tiff?|webp)$/i;
     const unsupported = files.filter(file => !supported.test(file.name));
     if (unsupported.length) { setAttachmentError(`Unsupported file: ${unsupported.map(file => file.name).join(", ")}. Use documents, spreadsheets, text, code or images.`); return; }
     const queued = files.map(file => ({ file, key: crypto.randomUUID() }));
@@ -192,7 +192,7 @@ export default function ChatInput({ c, value, onChange, onSend, onDocumentStateC
         ))}
         <div className="flex items-end gap-3">
         <input ref={fileInputRef} type="file" multiple className="hidden" onChange={event => { const files = Array.from(event.target.files || []); event.target.value = ""; void uploadAttachments(files); }} />
-        <button onClick={() => fileInputRef.current?.click()} disabled={isUploading || disabled} className="flex-shrink-0 transition-opacity hover:opacity-70 disabled:opacity-50 pb-0.5" style={{ color: c.mainSub }} title="Upload up to 5 files (20 MB each)">
+        <button onClick={() => fileInputRef.current?.click()} disabled={isUploading || disabled} className="flex-shrink-0 transition-opacity hover:opacity-70 disabled:opacity-50 pb-0.5" style={{ color: c.mainSub }} title="Upload up to 5 files (10 MB each)">
           <Plus size={18} strokeWidth={1.5} />
         </button>
         <textarea ref={textareaRef} value={value} onChange={e => onChange(e.target.value)} onKeyDown={handleKeyDown} aria-label="Message" placeholder={isUploading ? "Draft your question while the file is prepared…" : isRecording ? t("listening") : t("askAnything")} rows={1} className="min-w-0 flex-1 bg-transparent resize-none focus:outline-none text-[14px] leading-relaxed" style={{ color: c.mainFg, caretColor: "#7c5af0", maxHeight: 160, overflowY: "auto" }} />

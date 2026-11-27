@@ -4,7 +4,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 from bson import ObjectId
-from fastapi import HTTPException, UploadFile
+from fastapi import BackgroundTasks, HTTPException, UploadFile
 
 with patch("pymongo.MongoClient"):
     import main
@@ -97,7 +97,7 @@ def test_upload_marks_indexed_only_after_ingestion_returns(monkeypatch):
 
     rag.ingest.side_effect = ingest
     monkeypatch.setattr(main, "get_rag", lambda _: rag)
-    result = main.upload(UploadFile(filename="notes.txt", file=BytesIO(b"Some notes")), "12345678-1234-1234-1234-123456789012", {"_id": ObjectId()})
+    result = main.upload(background_tasks=BackgroundTasks(), file=UploadFile(filename="notes.txt", file=BytesIO(b"Some notes")), client_document_id="12345678-1234-1234-1234-123456789012", u={"_id": ObjectId()})
     assert result["document"]["status"] == "indexed"
     assert result["document"]["elementCount"] == 3
     assert database.documents.insert_one.call_args.args[0]["storageProvider"] == "browser-opfs"
@@ -114,7 +114,7 @@ def test_failed_ingestion_never_marks_upload_indexed(monkeypatch):
     cleanup = Mock()
     monkeypatch.setattr(main, "delete_document_artifacts", cleanup)
     with pytest.raises(HTTPException) as error:
-        main.upload(UploadFile(filename="notes.txt", file=BytesIO(b"Some notes")), "12345678-1234-1234-1234-123456789012", {"_id": ObjectId()})
+        main.upload(background_tasks=BackgroundTasks(), file=UploadFile(filename="notes.txt", file=BytesIO(b"Some notes")), client_document_id="12345678-1234-1234-1234-123456789012", u={"_id": ObjectId()})
     assert error.value.status_code == 502
     database.documents.update_one.assert_not_called()
     cleanup.assert_called_once()

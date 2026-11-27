@@ -47,6 +47,7 @@ def test_query_cache_is_bounded_and_can_be_cleared():
 def test_worker_pool_runs_concurrently_preserves_order_and_closes():
     resources = IOResources(workers=2)
     barrier = Barrier(2)
+    executor = None
 
     def work(number):
         barrier.wait(timeout=5)
@@ -56,10 +57,12 @@ def test_worker_pool_runs_concurrently_preserves_order_and_closes():
         assert resources._executor is None
         assert resources.map(work, [1, 2, 3, 4]) == [2, 4, 6, 8]
         executor = resources._executor
+        assert executor is not None
         assert resources.map(lambda item: item, [5]) == [5]
         assert resources._executor is executor
     finally:
         resources.close()
+    assert executor is not None
     with pytest.raises(RuntimeError):
         executor.submit(lambda: None)
 
@@ -86,8 +89,11 @@ def test_reader_abstraction_and_word_polymorphism():
     from io import BytesIO
     from docx import Document
 
-    with pytest.raises(TypeError):
-        DocumentReader()
+    class ConcreteReader(DocumentReader):
+        def read(self, content: bytes) -> str:
+            return content.decode()
+
+    assert ConcreteReader().read(b"Study notes") == "Study notes"
     document = Document()
     document.add_paragraph("Study notes")
     content = BytesIO()

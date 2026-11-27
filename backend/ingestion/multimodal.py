@@ -10,10 +10,8 @@ from pathlib import Path
 from typing import Any
 
 from chunking.chunker import chunk_text
-from ingestion.cloud_ocr import CloudOCRError, configured as cloud_ocr_configured, extract_text as cloud_ocr_text
 from ingestion.file_router import IMAGE_EXTENSIONS, extract_text
-from ingestion.image_reader import validate_image
-from rag.resources import resources
+from ingestion.image_reader import extract_image_text, validate_image
 
 logger = logging.getLogger(__name__)
 
@@ -47,14 +45,13 @@ def _normalized_image(content: bytes) -> tuple[str, str]:
     return base64.b64encode(output.getvalue()).decode("ascii"), "image/jpeg"
 
 
-def _cloud_ocr_elements(image_b64: str, mime_type: str, page: int | None = None) -> list[ContentElement]:
-    if not cloud_ocr_configured():
-        return []
+def _local_ocr_elements(image_b64: str, page: int | None = None) -> list[ContentElement]:
     try:
-        text = cloud_ocr_text(base64.b64decode(image_b64), mime_type)
-    except CloudOCRError:
+        text = extract_image_text(base64.b64decode(image_b64))
+    except Exception as error:
+        logger.warning("Local OCR failed (%s)", type(error).__name__)
         return []
-    return [_element("text", chunk, page=page, source="cloud_ocr") for chunk in chunk_text(text)]
+    return [_element("text", chunk, page=page, source="rapidocr") for chunk in chunk_text(text)] if text else []
 
 
 def _render_pdf_page(content: bytes, page_index: int, document=None):
@@ -78,27 +75,11 @@ def _render_pdf_page(content: bytes, page_index: int, document=None):
 
 
 def _append_pdf_ocr(elements: list[ContentElement]) -> list[ContentElement]:
-    """OCR each unique image once, with bounded concurrent I/O and page links."""
-    if not cloud_ocr_configured():
-        return elements
-    unique_images = {}
-    for element in elements:
-        if element.kind == "image":
-            key = (element.content, element.metadata["mime_type"])
-            unique_images.setdefault(key, element)
-    if not unique_images:
-        return elements
-    logger.info("PDF OCR: %d unique images (up to 3 concurrent requests)", len(unique_images))
-    def read_image(element: ContentElement):
-        return _cloud_ocr_elements(element.content, element.metadata["mime_type"])
-    recognized = dict(zip(unique_images, resources.map(read_image, unique_images.values())))
     results = []
     for element in elements:
         results.append(element)
         if element.kind == "image":
-            for chunk in recognized[(element.content, element.metadata["mime_type"])]:
-                # Each occurrence keeps a unique ID and its own source page.
-                results.append(_element("text", chunk.content, page=element.metadata.get("page"), source="cloud_ocr"))
+            results.extend(_local_ocr_elements(element.content, page=element.metadata.get("page")))
     return results
 
 
@@ -129,7 +110,7 @@ def _pdf_elements(content: bytes) -> list[ContentElement]:
                 results.append(_element("image", image_b64, page=page_number, mime_type=mime_type, source="embedded"))
 
             # Reuse the PDFium document for all sparse/scanned pages.
-            if len(text) < 40:
+            if not text:
                 try:
                     if rendered_document is None:
                         import pypdfium2 as pdfium
@@ -146,6 +127,8 @@ def _pdf_elements(content: bytes) -> list[ContentElement]:
 
 
 def extract_elements(filename: str, content: bytes) -> list[ContentElement]:
+    if len(content) > 10 * 1024 * 1024:
+        raise ValueError("File too large (10MB maximum)")
     extension = Path(filename).suffix.lower()
     if extension == ".pdf":
         return _pdf_elements(content)
@@ -155,7 +138,7 @@ def extract_elements(filename: str, content: bytes) -> list[ContentElement]:
         image_b64, mime_type = _normalized_image(content)
         return [
             _element("image", image_b64, mime_type=mime_type, source="vision"),
-            *_cloud_ocr_elements(image_b64, mime_type),
+            *_local_ocr_elements(image_b64),
         ]
 
     text = extract_text(filename, content)
@@ -163,14 +146,15 @@ def extract_elements(filename: str, content: bytes) -> list[ContentElement]:
     if extension == ".docx":
         from docx import Document
         document = Document(BytesIO(content))
-        for part in document.part.package.iter_parts():
-            if not part.content_type.startswith("image/") or not str(part.partname).startswith("/word/media/"):
-                continue
-            try:
-                image_b64, mime_type = _normalized_image(part.blob)
-            except (OSError, ValueError):
-                # Some Word drawing formats (e.g. EMF) cannot be rasterized.
-                continue
-            elements.append(_element("image", image_b64, mime_type=mime_type, source="embedded"))
-            elements.extend(_cloud_ocr_elements(image_b64, mime_type))
+        package = document.part.package
+        if package is not None:
+            for part in package.iter_parts():
+                if not part.content_type.startswith("image/") or not str(part.partname).startswith("/word/media/"):
+                    continue
+                try:
+                    image_b64, mime_type = _normalized_image(part.blob)
+                except (OSError, ValueError):
+                    continue
+                elements.append(_element("image", image_b64, mime_type=mime_type, source="embedded"))
+                elements.extend(_local_ocr_elements(image_b64))
     return elements

@@ -6,9 +6,17 @@ from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 
+def _api_key() -> str:
+    return os.getenv("SUPABASE_SECRET_KEY") or os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+
+
+def supabase_api_configured() -> bool:
+    return bool(os.getenv("SUPABASE_URL") and _api_key())
+
+
 def _settings() -> tuple[str, str, str]:
     url = os.getenv("SUPABASE_URL", "").rstrip("/")
-    key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+    key = _api_key()
     bucket = os.getenv("SUPABASE_STORAGE_BUCKET", "documents")
     if not url or not key:
         raise RuntimeError("Supabase Storage is not configured")
@@ -82,7 +90,7 @@ def signed_download_url(storage_path: str, download_name: str) -> str:
 
 def sync_upload_metadata(document: dict) -> None:
     """Mirror IDs and filename only; keep file bytes in browser storage."""
-    if not os.getenv("SUPABASE_URL") or not os.getenv("SUPABASE_SERVICE_ROLE_KEY"):
+    if not supabase_api_configured():
         return
     url, _, _ = _settings()
     values = {"document_id": str(document["_id"]), "user_id": str(document["userId"]),
@@ -92,7 +100,7 @@ def sync_upload_metadata(document: dict) -> None:
 
 
 def delete_upload_metadata(document_id) -> None:
-    if not os.getenv("SUPABASE_URL") or not os.getenv("SUPABASE_SERVICE_ROLE_KEY"):
+    if not supabase_api_configured():
         return
     url, _, _ = _settings()
     _request("DELETE", f"{url}/rest/v1/uploaded_documents?document_id=eq.{quote(str(document_id))}")

@@ -35,7 +35,7 @@ def test_docx_preserves_table_order_and_headers():
 
 
 def test_image_only_docx_reaches_vision(monkeypatch):
-    monkeypatch.setattr("ingestion.multimodal.cloud_ocr_configured", lambda: False)
+    monkeypatch.setattr("ingestion.multimodal.extract_image_text", lambda content: "")
     elements = extract_elements("scan.docx", word_file(image_only=True))
     assert len(elements) == 1
     assert elements[0].kind == "image"
@@ -45,7 +45,7 @@ def test_docx_ingestion_stores_vectors_in_real_chroma(tmp_path, monkeypatch):
     monkeypatch.setenv("CHROMA_MODE", "local")
     monkeypatch.setenv("ENVIRONMENT", "development")
     monkeypatch.setenv("CHROMA_PATH", str(tmp_path / "chroma"))
-    monkeypatch.setattr("ingestion.multimodal.cloud_ocr_configured", lambda: False)
+    monkeypatch.setattr("ingestion.multimodal.extract_image_text", lambda content: "")
     rag = MultimodalRAG.__new__(MultimodalRAG)
     rag.database = Mock()
     # Deterministic vectors isolate persistence from model downloads/API calls.
@@ -58,7 +58,13 @@ def test_docx_ingestion_stores_vectors_in_real_chroma(tmp_path, monkeypatch):
     reopened = ChromaVectorStore(2)
     rows = reopened.collection.get(where={"document_id": str(did)}, include=["embeddings", "metadatas", "documents"])
     assert len(rows["ids"]) == count >= 2
-    assert all(metadata["user_id"] == str(uid) for metadata in rows["metadatas"])
-    assert any("Definition" in text for text in rows["documents"])
-    assert all(list(vector) == [1.0, 0.0] for vector in rows["embeddings"])
+    metadatas = rows["metadatas"]
+    documents = rows["documents"]
+    embeddings = rows["embeddings"]
+    assert metadatas is not None
+    assert documents is not None
+    assert embeddings is not None
+    assert all(metadata["user_id"] == str(uid) for metadata in metadatas)
+    assert any("Definition" in text for text in documents)
+    assert all(list(vector) == [1.0, 0.0] for vector in embeddings)
     assert reopened.search([1.0, 0.0], str(uid), document_id=str(did))

@@ -1,125 +1,148 @@
 # Synapse AI
 
-An AI-powered study assistant — MERN foundation (MongoDB, Express, React, Node), with a Python/FastAPI + ChromaDB service scaffolded for the RAG features described in the project brief.
+Synapse AI is a study assistant for asking questions about course materials and creating study resources. The web client is built with React, TypeScript, and Vite. A FastAPI service handles authentication, document processing, retrieval-augmented generation (RAG), and persistence.
 
-## Structure
+## Features
 
-```
-frontend/     React + Vite + TypeScript + Tailwind + shadcn/ui
-backend/      Node.js + Express + MongoDB (Mongoose), session-based auth
-ai-service/   Python + FastAPI + ChromaDB (scaffold — not wired up yet)
-```
+- Register and sign in with email verification, session-based authentication, and password recovery.
+- Upload and ask questions about PDF, DOCX, PPTX, XLSX, text, code, CSV, and common image files.
+- Chat with up to five selected documents and generate study materials from them.
+- Extract and index document content for retrieval, including OCR and image understanding.
+- Store application data in MongoDB and vectors in Supabase pgvector by default. Chroma and Qdrant adapters are also available.
 
-## Current server layout
+## Architecture
 
-The FastAPI application that the frontend uses is `backend/main.py` and runs on
-port 5000. The retained Chroma/RAG scaffold, including its existing `.env`, now
-lives at `backend/ai-service/`; run it from that directory if you need it:
+| Component | Technology | Responsibility |
+| --- | --- | --- |
+| Web client | React, TypeScript, Vite | User interface, document selection, and browser-side file retention |
+| API | Python 3.11, FastAPI | Authentication, document ingestion, chat, and study-material endpoints |
+| Application database | MongoDB / PyMongo | Accounts, document status and extracted content, conversations, and messages |
+| Vector database | Supabase Postgres / pgvector (default) | Embedding storage and similarity search; Chroma and Qdrant adapters are also available |
+| Embeddings | FastEmbed, BGE small English model | Local generation of document and query vectors |
+| Language models | Groq | Chat responses, study material generation, and image descriptions |
+| Original file storage | Browser OPFS and IndexedDB | Original uploaded file bytes and local document metadata |
 
-```
-cd backend\ai-service
-C:\Users\durga\AppData\Local\Programs\Python\Python310\python.exe -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-uvicorn main:app --reload --port 8000
-```
+Original uploaded files are retained in the browser's origin-private storage. MongoDB stores extracted content needed for RAG and conversation history. Vector records are filtered by user and may also be filtered by document. See [backend/ARCHITECTURE.md](backend/ARCHITECTURE.md) for storage, provider switching, and vector reindexing details.
 
-Use Python 3.10 for the Chroma service. Python 3.13 has no compatible NumPy
-wheel for its pinned dependency and otherwise attempts a local compiler build.
+## Requirements
 
-## Running locally
+| Requirement | Version or configuration | Purpose |
+| --- | --- | --- |
+| Python | 3.11 | Runs the FastAPI backend and document/RAG pipeline |
+| Node.js and npm | Node.js 20 or newer | Installs and runs the React/Vite frontend |
+| MongoDB | Reachable database and connection URI | Persistent application data |
+| Supabase PostgreSQL | Database connection URI with required pgvector/table privileges | Default vector store; can be replaced with Chroma or Qdrant |
+| Groq | API key | AI responses and study-material generation |
+| SMTP | Optional server credentials | Delivers registration and password-reset messages |
 
-Each service runs independently, in its own terminal.
+In development, the application can display the verification code when email is not configured. For production, configure SMTP to deliver account messages.
 
-Python packages belong only in `ai-service/requirements.txt`. The frontend and
-backend are Node.js applications: their separate dependency manifests are
-`frontend/package.json` and `backend/package.json`, and they must be installed
-with `npm install` from those folders. Do not run `pip install -r requirements.txt`
-from the repository root or from `backend` because no such Python file exists there.
+## Local development
 
-### 1. Backend (Express API)
+### 1. Configure the backend
 
-```
+```powershell
 cd backend
-npm install
-npm run dev
-```
-
-Runs on `http://localhost:5000`.
-
-Set `AI_SERVICE_URL=http://localhost:8000` in `backend/.env` to enable the AI
-service. If it is unavailable, chat continues to use the existing fallback reply.
-Do not run `backend/main.py` on port 5000: it is an obsolete prototype and
-does not provide the Express account-deletion implementation used by the UI.
-
-### 2. Frontend
-
-```
-cd frontend
-npm install
-npm run dev
-```
-
-Runs on `http://localhost:5173`.
-
-### 3. AI service (optional, scaffold only)
-
-```
-cd ai-service
+Copy-Item .env.example .env
 python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-uvicorn main:app --reload
-```
-
-Runs on `http://localhost:8000`. Not called by the backend yet — `POST /api/rag/query` returns a placeholder until RAG (embeddings + Gemini) is implemented.
-
-### Supabase document storage
-
-Supabase is used only for uploaded-file storage and the small file metadata
-table. MongoDB remains the application-data store; ChromaDB remains reserved
-for embeddings and vector search.
-
-1. In the Supabase SQL Editor, run [`backend/supabase/documents.sql`](backend/supabase/documents.sql).
-   It creates a private `documents` bucket, enforces a 20 MB object limit, and
-   creates the minimal `public.documents` metadata table.
-2. Copy `backend/.env.example` to `backend/.env` and set `SUPABASE_URL` and
-   `SUPABASE_SERVICE_ROLE_KEY`. Keep the service-role key server-side only and
-   never commit it or expose it through Vite.
-
-Every upload is stored as `userId/random-file-name.ext` in the private bucket.
-The backend authorizes ownership before issuing a 60-second download URL. Files
-of any type are accepted up to 20 MB; downstream AI processing can selectively
-handle the study formats it supports.
-
-### AI service and the `chromadb` Pylance warning
-
-The warning means the selected VS Code interpreter does not contain the package;
-it is not a problem in `main.py`. Use Python 3.10, create the AI service's own
-environment, install the existing requirements, then choose
-`ai-service/.venv/Scripts/python.exe` with **Python: Select Interpreter**:
-
-```
-cd ai-service
-py -3.10 -m venv .venv
-.venv\Scripts\activate
+.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-## What's implemented
+Edit `backend/.env` and provide at least:
 
-- User registration with OTP email verification (two-step: `POST /api/auth/register` stashes the signup and returns a code, `POST /api/auth/verify-registration` checks it and only then creates the account/session — no account exists until verified), login, logout (bcrypt + server-side sessions stored in MongoDB)
-- Forgot / reset password (token-based). Since no email service is configured, both this and the registration OTP are returned directly in the API response instead of being emailed — see the comments in `backend/src/routes/auth.routes.js`
-- Chat conversations and messages persisted per-user in MongoDB
-- Document upload (PDF/DOC/DOCX/PPT/PPTX) stored on local disk (`backend/uploads/`, gitignored), metadata in MongoDB
-- Quiz and flashcard generation, saved per-user in MongoDB — content is currently stub placeholder text
-- A Postman collection ([`Synapse.postman_collection.json`](Synapse.postman_collection.json)) covering all of the above, plus the AI service health checks
+```dotenv
+MONGODB_URI=mongodb+srv://<user>:<password>@<cluster>/?retryWrites=true&w=majority
+MONGODB_DATABASE=SynapseAI
+SESSION_SECRET=<long-random-secret>
+CLIENT_URL=http://localhost:5173
+GROQ_API_KEY=<groq-api-key>
+SUPABASE_DB_URL=<postgresql-connection-string>
+SUPABASE_VECTOR_DIMENSIONS=384
+VECTOR_STORE=supabase
+```
 
-All "generated" content (chat replies, quiz questions, flashcards) is placeholder text for now — each has one clearly-marked function to swap for a real call to `ai-service`/an LLM once RAG is built:
-- `backend/src/routes/chat.routes.js` → `generateAssistantReply`
-- `backend/src/routes/quiz.routes.js` → `generateStubQuiz`
-- `backend/src/routes/flashcard.routes.js` → `generateStubFlashcards`
+The following table summarizes the backend settings. The checked-in [backend/.env.example](backend/.env.example) lists additional SMTP and Supabase metadata-mirror settings.
 
-## Original design
+| Variable | Required | Description |
+| --- | --- | --- |
+| `MONGODB_URI` | Yes | MongoDB connection URI; URL-encode reserved characters in credentials. |
+| `MONGODB_DATABASE` | No | Database name; defaults to `SynapseAI`. |
+| `SESSION_SECRET` | Yes for deployment | Secret used to sign browser sessions. Set a unique, long random value. |
+| `CLIENT_URL` | Yes for deployment | Exact frontend origin allowed by the API CORS policy. |
+| `GROQ_API_KEY` | For AI features | Key for chat, study generation, and image understanding. |
+| `VECTOR_STORE` | No | Vector adapter: `supabase` (default), `chroma`, or `qdrant`. |
+| `SUPABASE_DB_URL` | When using Supabase | Backend PostgreSQL connection string; role needs extension, schema, table, index, and grant privileges. |
+| `SUPABASE_VECTOR_DIMENSIONS` | No | Vector width; defaults to `384` for the configured default embedding model. |
+| `SUPABASE_URL` and `SUPABASE_SECRET_KEY` | No | Enable the Supabase REST metadata mirror; the service-role key can be supplied as `SUPABASE_SERVICE_ROLE_KEY`. |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD` | For email delivery | SMTP configuration for verification and password-reset messages. |
+| `ENVIRONMENT` | No | Set to `production` in deployed environments to disable development OTP disclosure. |
 
-The frontend UI was originally exported from Figma Make ("Complete SaaS App Screens"); see [`frontend/ATTRIBUTIONS.md`](frontend/ATTRIBUTIONS.md) for third-party licenses (shadcn/ui, Unsplash).
+The Supabase connection is used by the backend to create and access the pgvector extension and application tables. Keep database URLs, API keys, and session secrets out of frontend environment variables and version control.
+
+To send account emails, also configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, and optionally `SMTP_FROM`. `ENVIRONMENT=production` disables development OTP disclosure. For non-local deployments set `CLIENT_URL` to the exact frontend origin and use a strong unique `SESSION_SECRET`.
+
+Run the API from the `backend` directory:
+
+```powershell
+uvicorn main:app --reload --host 127.0.0.1 --port 8000
+```
+
+The API is available at `http://localhost:8000`; interactive OpenAPI docs are at `http://localhost:8000/docs`.
+
+### 2. Configure and run the frontend
+
+In a second terminal:
+
+```powershell
+cd frontend
+npm ci
+npm run dev
+```
+
+Vite serves the app at `http://localhost:5173`. The client defaults to the API at `http://localhost:8000`; set `VITE_API_URL` when using another API origin.
+
+## Vector store providers
+
+Supabase is the default and expects `SUPABASE_DB_URL`. To use another adapter, set `VECTOR_STORE=chroma` or `VECTOR_STORE=qdrant` and configure the provider-specific values described in [backend/ARCHITECTURE.md](backend/ARCHITECTURE.md). Chroma supports local, server, and cloud modes; Qdrant supports local storage or a configured remote URL.
+
+Changing providers does not move existing vectors. Stop the backend and run the reindex script from `backend` after configuring the target provider:
+
+```powershell
+python sync_document_stores.py
+```
+
+The script re-embeds saved MongoDB content. Rebuild the index if the embedding model or vector dimensions change.
+
+## Tests and production build
+
+Run backend tests from `backend`:
+
+```powershell
+python -m pytest
+```
+
+Build the frontend from `frontend`:
+
+```powershell
+npm run build
+```
+
+## API and project layout
+
+The FastAPI entry point is `backend/main.py`. Routes and response shapes are consumed by `frontend/src/app/lib/api.ts`. The Postman collection is [`Synapse.postman_collection.json`](Synapse.postman_collection.json).
+
+```text
+backend/    FastAPI API, MongoDB persistence, ingestion, RAG, and vector adapters
+frontend/   React, TypeScript, and Vite application
+```
+
+## Security and operations
+
+- Never commit `.env` files or expose backend secrets through `VITE_*` variables.
+- Use HTTPS, a strong session secret, restricted database access, and production SMTP settings when deploying.
+- The API creates MongoDB indexes during startup. The Supabase vector adapter initializes its extension, tables, and indexes when first used; the backend database role must have the required privileges.
+- Uploaded files are limited to 10 MB each and up to five attachments per message.
+
+For MongoDB Atlas network-access guidance, see [backend/ATLAS_SETUP.md](backend/ATLAS_SETUP.md).

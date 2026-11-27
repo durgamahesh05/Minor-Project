@@ -5,16 +5,22 @@ from pathlib import Path
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 from email.message import EmailMessage
+from email.utils import formataddr, parseaddr
 import bcrypt
 from bson import ObjectId
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
-from pymongo import DESCENDING, MongoClient
+from pymongo import DESCENDING
 from starlette.middleware.sessions import SessionMiddleware
-from document_storage import delete_document, signed_download_url, sync_upload_metadata, delete_upload_metadata
+from db import create_mongo_client, get_database
+from lib.document_storage import delete_document, signed_download_url, sync_upload_metadata, delete_upload_metadata
+from lib.otp import generate_otp
+from lib.validate_password import is_valid_password
+from middleware.auth import require_admin, require_auth
 from ingestion.file_router import SUPPORTED_EXTENSIONS
 from rag.resources import resources as io_resources
 from rag.response_policy import ResponseLevel
@@ -52,9 +58,14 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 app: FastAPI = FastAPI(title="Synapse API", lifespan=lifespan)
 app.add_middleware(SessionMiddleware, secret_key=os.getenv("SESSION_SECRET", "replace-in-production"), max_age=604800)
 app.add_middleware(CORSMiddleware, allow_origins=[os.getenv("CLIENT_URL", "http://localhost:5173")], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
-mongo_client=MongoClient(os.getenv("MONGODB_URI", "mongodb://localhost:27017"),tz_aware=True,maxPoolSize=50,minPoolSize=0,waitQueueTimeoutMS=10000)
-db=mongo_client.get_database("SynapseAI"); uploads=Path(__file__).parent/"uploads"
-MAX_DOCUMENT_SIZE=20*1024*1024
+mongo_client=create_mongo_client()
+db=get_database(mongo_client);app.state.db=db; uploads=Path(__file__).parent/"uploads"
+
+@app.exception_handler(HTTPException)
+async def handle_http_error(request: Request, error: HTTPException):
+ return JSONResponse(status_code=error.status_code,content={"message":error.detail},headers=error.headers)
+
+MAX_DOCUMENT_SIZE=10*1024*1024
 fallback="I'm Synapse. I can help you understand your documents, generate flashcards, quiz you, and create summaries."
 class Data(BaseModel):
  documentIds:list[str]|None=None
@@ -72,20 +83,15 @@ def view(d,drop=()):
  for k,v in r.items():
   if isinstance(v,(ObjectId,datetime)):r[k]=str(v) if isinstance(v,ObjectId) else v.isoformat()
  return r
-def user(request:Request):
- x=db.users.find_one({"_id":oid(request.session["userId"])}) if request.session.get("userId") else None
- if not x:raise HTTPException(401,"Not authenticated")
- return x
-def admin(u=Depends(user)):
- if u.get("role","user")!="admin":raise HTTPException(403,"Admin access required")
- return u
+user=require_auth
+admin=require_admin
 def public(x):return {"id":str(x["_id"]),"name":x["name"],"email":x["email"],"role":x.get("role","user")}
 def owned(collection,ident,u):
  x=db[collection].find_one({"_id":oid(ident),"userId":u["_id"]})
  if not x:raise HTTPException(404,"Resource not found")
  return x
 
-def chat_document(document_id,u):
+def chat_document(document_id,u) -> ObjectId | None:
  if document_id:
   document=owned("documents",document_id,u)
   if document.get("status")!="indexed":raise HTTPException(409,"This document is not ready for questions. Wait for indexing to finish, or upload it again if processing failed.")
@@ -93,19 +99,30 @@ def chat_document(document_id,u):
  if db.documents.find_one({"userId":u["_id"],"status":{"$in":["uploading","processing"]}}):
   raise HTTPException(409,"A document is still being indexed. Please wait before sending your question.")
  return None
-def selected_documents(b, u):
+def selected_documents(b, u) -> list[ObjectId]:
  ids=list(dict.fromkeys(b.documentIds or ([b.documentId] if b.documentId else [])))
  if len(ids)>5:raise HTTPException(400,"Attach up to 5 files per message")
  if not ids:
   chat_document(None,u)
   return []
- return [chat_document(ident,u) for ident in ids]
+ document_ids: list[ObjectId] = []
+ for ident in ids:
+  document_id = chat_document(ident,u)
+  if document_id is not None:
+   document_ids.append(document_id)
+ return document_ids
 
-def password_ok(p):return bool(p and len(p)>=7 and any(x.isupper() for x in p) and any(x.islower() for x in p) and any(x.isdigit() for x in p) and any(not x.isalnum() for x in p))
+def password_ok(password):return is_valid_password(password or "")
 def send_email(recipient, subject, text):
  host=(os.getenv("SMTP_HOST") or "").strip(); username=(os.getenv("SMTP_USERNAME") or "").strip(); password=os.getenv("SMTP_PASSWORD")
  if not host or not username or not password: return False
- message=EmailMessage();message["Subject"]=subject;message["From"]=os.getenv("SMTP_FROM",username);message["To"]=recipient;message.set_content(text)
+ _, login_username = parseaddr(username)
+ username = login_username or username
+ sender = (os.getenv("SMTP_FROM") or username).strip()
+ sender_name, sender_address = parseaddr(sender)
+ if sender_address:
+  sender = formataddr((sender_name or "Synapse", sender_address))
+ message=EmailMessage();message["Subject"]=subject;message["From"]=sender;message["To"]=recipient;message.set_content(text)
  try:
   port=int(os.getenv("SMTP_PORT","465"))
   if not 1 <= port <= 65535: raise ValueError("Invalid SMTP port")
@@ -144,7 +161,7 @@ def otp_response(message,email,code,sent):
 def health(): return {"status":"ok"}
 @app.get("/health/chroma")
 def chroma_health():
- if os.getenv("VECTOR_STORE", "qdrant").lower()!="chroma":return {"status":"not active","provider":os.getenv("VECTOR_STORE","qdrant")}
+ if os.getenv("VECTOR_STORE", "supabase").lower()!="chroma":return {"status":"not active","provider":os.getenv("VECTOR_STORE","supabase")}
  try:
   from vectorstore.chroma import chroma_client
   client=chroma_client()
@@ -165,7 +182,7 @@ def register(b:Data):
  if not b.name or not b.email or not b.password or not password_ok(b.password):raise HTTPException(400,"Name, email and a valid password are required")
  email=b.email.lower()
  if db.users.find_one({"email":email}):raise HTTPException(409,"An account with this email already exists")
- code=f"{secrets.randbelow(1000000):06d}";db.pendingregistrations.update_one({"email":email},{"$set":{"name":b.name,"email":email,"passwordHash":bcrypt.hashpw(b.password.encode(),bcrypt.gensalt()).decode(),"otpHash":dig(code),"otpExpiresAt":now()+timedelta(minutes=10),"updatedAt":now()},"$setOnInsert":{"createdAt":now()}},upsert=True);sent=send_email(email,"Your Synapse verification code",f"Your Synapse verification code is {code}. It expires in 10 minutes.");return otp_response("Verification code sent.",email,code,sent)
+ code=generate_otp();db.pendingregistrations.update_one({"email":email},{"$set":{"name":b.name,"email":email,"passwordHash":bcrypt.hashpw(b.password.encode(),bcrypt.gensalt()).decode(),"otpHash":dig(code),"otpExpiresAt":now()+timedelta(minutes=10),"updatedAt":now()},"$setOnInsert":{"createdAt":now()}},upsert=True);sent=send_email(email,"Your Synapse verification code",f"Your Synapse verification code is {code}. It expires in 10 minutes.");return otp_response("Verification code sent.",email,code,sent)
 @app.post("/api/auth/verify-registration",status_code=201)
 def verify(b:Data,request:Request):
  p=db.pendingregistrations.find_one({"email":(b.email or '').lower()})
@@ -175,7 +192,7 @@ def verify(b:Data,request:Request):
 def resend_registration_otp(b:Data):
  email=(b.email or "").lower();pending=db.pendingregistrations.find_one({"email":email})
  if not pending:raise HTTPException(400,"No pending signup found for this email. Please sign up again.")
- code=f"{secrets.randbelow(1000000):06d}";db.pendingregistrations.update_one({"_id":pending["_id"]},{"$set":{"otpHash":dig(code),"otpExpiresAt":now()+timedelta(minutes=10)}});sent=send_email(email,"Your new Synapse verification code",f"Your Synapse verification code is {code}. It expires in 10 minutes.");return otp_response("Verification code sent.",email,code,sent)
+ code=generate_otp();db.pendingregistrations.update_one({"_id":pending["_id"]},{"$set":{"otpHash":dig(code),"otpExpiresAt":now()+timedelta(minutes=10)}});sent=send_email(email,"Your new Synapse verification code",f"Your Synapse verification code is {code}. It expires in 10 minutes.");return otp_response("Verification code sent.",email,code,sent)
 @app.post("/api/auth/login")
 def login(b:Data,request:Request):
  x=db.users.find_one({"email":(b.email or '').lower()})
@@ -198,7 +215,7 @@ def forgot_password(b:Data):
  if not b.email or not valid_email(b.email):raise HTTPException(400,"Enter a valid email address")
  email=b.email.strip().lower();x=db.users.find_one({"email":email});response={"message":"If an account exists for this email, an OTP has been sent.","expiresIn":RESET_OTP_TTL_SECONDS,"resendCooldown":RESET_RESEND_COOLDOWN_SECONDS}
  if not x:return response
- code=f"{secrets.randbelow(1000000):06d}";sent=send_email(email,"Your Synapse password reset code",f"Your Synapse password reset code is {code}. It expires in 10 minutes. If you did not request this, ignore this email.")
+ code=generate_otp();sent=send_email(email,"Your Synapse password reset code",f"Your Synapse password reset code is {code}. It expires in 10 minutes. If you did not request this, ignore this email.")
  if not sent and os.getenv("ENVIRONMENT","development").lower()=="production":raise HTTPException(503,"Email delivery is temporarily unavailable. Please try again later.")
  db.passwordresetotps.create_index("expiresAt",expireAfterSeconds=0)
  db.passwordresetotps.replace_one({"email":email},{"email":email,"userId":x["_id"],"otpHash":dig(code),"expiresAt":now()+timedelta(seconds=RESET_OTP_TTL_SECONDS),"attempts":0,"resendCount":0,"lastSentAt":now(),"createdAt":now()},upsert=True)
@@ -215,7 +232,7 @@ def resend_password_otp(b:Data):
  if record.get("resendCount",0)>=RESET_MAX_RESENDS:raise HTTPException(429,"OTP resend limit reached. Please try again later.")
  x=db.users.find_one({"_id":record["userId"]})
  if not x:db.passwordresetotps.delete_one({"_id":record["_id"]});return generic
- code=f"{secrets.randbelow(1000000):06d}";sent=send_email(email,"Your new Synapse password reset code",f"Your Synapse password reset code is {code}. It expires in 10 minutes. If you did not request this, ignore this email.")
+ code=generate_otp();sent=send_email(email,"Your new Synapse password reset code",f"Your Synapse password reset code is {code}. It expires in 10 minutes. If you did not request this, ignore this email.")
  db.passwordresetotps.update_one({"_id":record["_id"]},{"$set":{"otpHash":dig(code),"expiresAt":now()+timedelta(seconds=RESET_OTP_TTL_SECONDS),"attempts":0,"lastSentAt":now()},"$inc":{"resendCount":1}})
  if not sent and os.getenv("ENVIRONMENT","development").lower()!="production":generic["otp"]=code
  return generic
@@ -247,7 +264,7 @@ def reset_password(b:Data):
 
 @app.post("/api/account/delete/request")
 def request_account_deletion(u=Depends(user)):
- code=f"{secrets.randbelow(1000000):06d}"
+ code=generate_otp()
  db.users.update_one({"_id":u["_id"]},{"$set":{"deleteOtpHash":dig(code),"deleteOtpExpiresAt":now()+timedelta(minutes=10)}})
  sent=send_email(u["email"],"Confirm your Synapse account deletion",f"Your account deletion verification code is {code}. It expires in 10 minutes. If you did not request this, ignore this email.")
  return otp_response("Verification code sent.",u["email"],code,sent)
@@ -287,7 +304,7 @@ def message(ident:str,b:Data,u=Depends(user)):
  if not b.text or not b.text.strip():raise HTTPException(400,"Message text is required")
  c=owned("conversations",ident,u)
  document_ids=selected_documents(b,u)
- document_id=document_ids[0] if len(document_ids)==1 else None
+ document_id=document_ids[0] if len(document_ids)==1 and document_ids[0] is not None else None
  actions=study_actions(b.text.strip(),document_id)
  try:
   if actions:
@@ -302,15 +319,15 @@ def message(ident:str,b:Data,u=Depends(user)):
      failures.append(f"Could not generate {kind}: {error.detail}")
    actions=generated
    reply=("Your study materials are ready. Open them below to start studying." if generated else "") + ("\n\n" + "\n".join(failures) if failures else "")
-  elif len(document_ids)>1:reply=get_rag(db).answer(b.text.strip(),u["_id"],document_ids=document_ids,response_level=b.responseLevel).answer
+  elif len(document_ids)>1:reply=get_rag(db).answer(b.text.strip(),u["_id"],document_ids=[ident for ident in document_ids if ident is not None],response_level=b.responseLevel).answer
   else:reply=get_rag(db).chat(b.text.strip(),u["_id"],document_id=document_id,response_level=b.responseLevel).answer
  except Exception as error:raise HTTPException(502,f"Unable to answer your message: {error}") from error
  a={"conversationId":c["_id"],"role":"user","text":b.text.strip(),"createdAt":now()}
  if document_ids:
   attachments=[]
-  for ident in document_ids:
-   document=owned("documents",str(ident),u)
-   attachments.append({"id":str(ident),"originalName":document.get("originalName","Document"),"mimeType":document.get("mimeType","application/octet-stream"),"size":document.get("size",0),"clientDocumentId":document.get("clientDocumentId"),"storageProvider":document.get("storageProvider")})
+  for document_object_id in document_ids:
+   document=owned("documents",str(document_object_id),u)
+   attachments.append({"id":str(document_object_id),"originalName":document.get("originalName","Document"),"mimeType":document.get("mimeType","application/octet-stream"),"size":document.get("size",0),"clientDocumentId":document.get("clientDocumentId"),"storageProvider":document.get("storageProvider")})
   a["attachments"]=attachments
   a["attachment"]=attachments[0]
  a["_id"]=db.messages.insert_one(a).inserted_id
@@ -343,12 +360,12 @@ def mirror_upload_metadata(document):
   db.documents.update_one({"_id":document["_id"]},{"$set":{"metadataSync":"synced"}})
 
 @app.post("/api/documents",status_code=201)
-def upload(file:UploadFile=File(...),client_document_id:str=Form(...),u=Depends(user),background_tasks:BackgroundTasks=None):
+def upload(background_tasks:BackgroundTasks,file:UploadFile=File(...),client_document_id:str=Form(...),u=Depends(user)):
  original=file.filename or "upload";extension=Path(original).suffix.lower()
  if extension not in SUPPORTED_EXTENSIONS:raise HTTPException(400,"Supported files: PDF, DOCX, PPTX, XLSX, text, code, CSV, and common images")
  if not re.fullmatch(r"[0-9a-fA-F-]{36}",client_document_id):raise HTTPException(400,"Invalid browser document ID")
  content=file.file.read(MAX_DOCUMENT_SIZE+1)
- if len(content)>MAX_DOCUMENT_SIZE:raise HTTPException(400,"File too large (20MB maximum)")
+ if len(content)>MAX_DOCUMENT_SIZE:raise HTTPException(400,"File too large (10MB maximum)")
  x=None
  logging.getLogger(__name__).info("Upload received: %s (%d bytes)",original,len(content))
  try:
@@ -452,6 +469,7 @@ def generate_study_material(b, u, collection, field, prefix):
   if len(document_ids)==1:docid=document_ids[0]
  elif b.documentId:
   docid=chat_document(b.documentId,u)
+  if docid is None:raise HTTPException(404,"Resource not found")
   d=owned("documents",b.documentId,u);title=d["originalName"]
   document_ids=[docid]
  else:

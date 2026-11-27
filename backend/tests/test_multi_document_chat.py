@@ -84,7 +84,7 @@ def test_upload_returns_before_metadata_mirror_and_keeps_index_on_failure(monkey
     monkeypatch.setattr(main, "get_rag", lambda _: rag)
     monkeypatch.setattr(main, "sync_upload_metadata", mirror)
     tasks = BackgroundTasks()
-    result = main.upload(UploadFile(filename="notes.txt", file=BytesIO(b"Notes")), "12345678-1234-1234-1234-123456789012", {"_id": ObjectId()}, tasks)
+    result = main.upload(background_tasks=tasks, file=UploadFile(filename="notes.txt", file=BytesIO(b"Notes")), client_document_id="12345678-1234-1234-1234-123456789012", u={"_id": ObjectId()})
     assert result["document"]["status"] == "indexed"
     mirror.assert_not_called()
     asyncio.run(tasks())
@@ -101,7 +101,9 @@ def test_text_formats_are_read(extension):
 def test_xlsx_reads_all_sheets():
     from openpyxl import Workbook
     workbook = Workbook()
-    workbook.active.append(["Biology", "Cells"])
+    active_sheet = workbook.active
+    assert active_sheet is not None
+    active_sheet.append(["Biology", "Cells"])
     workbook.create_sheet("Physics").append(["Force", 42])
     output = BytesIO()
     workbook.save(output)

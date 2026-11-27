@@ -5,6 +5,7 @@ from unittest.mock import Mock, patch
 import pytest
 from bson import ObjectId
 from fastapi import HTTPException
+from fastapi.routing import APIRoute
 from pydantic import ValidationError
 
 with patch("pymongo.MongoClient"):
@@ -36,8 +37,18 @@ def test_invalid_ai_output_is_rejected(content):
         StudyMaterialGenerator(db, model).generate(ObjectId(), [ObjectId()], next(iter(content)))
 
 
+def find_endpoint(path, method):
+    for route in main.app.routes:
+        if not isinstance(route, APIRoute) or route.path != path:
+            continue
+        methods = route.methods
+        if methods is not None and method in methods:
+            return route.endpoint
+    raise LookupError(f"No {method} route found for {path}")
+
+
 def endpoint(path):
-    return next(route.endpoint for route in main.app.routes if getattr(route, "path", None) == path and "POST" in route.methods)
+    return find_endpoint(path, "POST")
 
 
 @pytest.mark.parametrize("path,collection,field,single", [("/api/quizzes", "quizzes", "questions", "quiz"), ("/api/flashcards", "flashcardsets", "cards", "set")])
@@ -135,7 +146,7 @@ def test_rename_owned_study_set(monkeypatch, path):
     monkeypatch.setattr(main, "db", db)
     owned = Mock(return_value={"_id": ident, "userId": uid, "title": "Old title"})
     monkeypatch.setattr(main, "owned", owned)
-    route = next(route.endpoint for route in main.app.routes if getattr(route, "path", None) == path and "PATCH" in route.methods)
+    route = find_endpoint(path, "PATCH")
     route(str(ident), main.Data(title="New name"), {"_id": uid})
     assert owned.call_args.args[2] == {"_id": uid}
     assert table.update_one.call_args.args[0] == {"_id": ident, "userId": uid}

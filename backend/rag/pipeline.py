@@ -13,6 +13,7 @@ from embeddings.embedder import Embedder
 from ingestion.multimodal import ContentElement, extract_elements
 from vectorstore.qdrant import QdrantVectorStore
 from vectorstore.chroma import ChromaVectorStore
+from vectorstore.supabase import SupabaseVectorStore
 from rag.resources import resources
 from rag.response_policy import ResponseLevel, response_policy
 
@@ -75,10 +76,11 @@ class MultimodalRAG:
                     dimension = getattr(self, "_vector_dimension", None)
                     if dimension is None:
                         dimension = len(self.embedder.embed_query("vector dimension probe"))
-                    provider = os.getenv("VECTOR_STORE", "qdrant").lower()
-                    if provider not in ("chroma", "qdrant"):
-                        raise ValueError("VECTOR_STORE must be chroma or qdrant")
-                    store_type = ChromaVectorStore if provider == "chroma" else QdrantVectorStore
+                    provider = os.getenv("VECTOR_STORE", "supabase").lower()
+                    stores = {"chroma": ChromaVectorStore, "qdrant": QdrantVectorStore, "supabase": SupabaseVectorStore}
+                    if provider not in stores:
+                        raise ValueError("VECTOR_STORE must be supabase, chroma, or qdrant")
+                    store_type = stores[provider]
                     self._vectorstore = store_type(dimension)
         return self._vectorstore
 
@@ -227,7 +229,9 @@ def close_rag_instances() -> None:
     for instance in instances:
         instance.embedder.clear_cache()
         if instance._vectorstore is not None:
-            close = getattr(instance._vectorstore.client, "close", None)
+            close = getattr(instance._vectorstore, "close", None)
+            if not callable(close):
+                close = getattr(getattr(instance._vectorstore, "client", None), "close", None)
             if callable(close):
                 close()
 
@@ -246,10 +250,14 @@ def get_rag(database) -> MultimodalRAG:
 def delete_document_artifacts(database, document_id: ObjectId) -> None:
     database.rag_elements.delete_many({"documentId": document_id})
     instance = _instances.get(id(database))
+    owns_store = False
     if instance and instance._vectorstore is not None:
         store = instance.vectorstore
-    elif os.getenv("VECTOR_STORE", "qdrant").lower() == "chroma":
+    elif os.getenv("VECTOR_STORE", "supabase").lower() == "chroma":
         store = ChromaVectorStore(0)
+    elif os.getenv("VECTOR_STORE", "supabase").lower() == "supabase":
+        store = SupabaseVectorStore(int(os.getenv("SUPABASE_VECTOR_DIMENSIONS", "384")))
+        owns_store = True
     else:
         store = None
     if store is not None:
@@ -259,3 +267,7 @@ def delete_document_artifacts(database, document_id: ObjectId) -> None:
             # The authoritative parent payload is gone; stale vector hits are
             # ignored by retrieve() if Qdrant is temporarily unavailable.
             pass
+        finally:
+            close = getattr(store, "close", None)
+            if owns_store and callable(close):
+                close()

@@ -27,6 +27,7 @@ Local `backend/.env`:
 
 ```ini
 MONGODB_URI=mongodb+srv://<database-user>:<encoded-password>@<cluster-host>/?retryWrites=true&w=majority
+MONGODB_DATABASE=SynapseAI
 CLIENT_URL=http://localhost:5173
 ```
 

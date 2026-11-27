@@ -38,7 +38,7 @@ export default function StudyDashboard({ kind }: { kind: "quiz" | "flashcards" }
   const handleUpload = async (file?: File) => {
     if (!file || busy) return;
     setError(null);
-    if (file.size > 20 * 1024 * 1024) { setError("Files must be 20 MB or smaller."); return; }
+    if (file.size > 10 * 1024 * 1024) { setError("Files must be 10 MB or smaller."); return; }
     setUploading(true);
     setProgress(0);
     let localId: string | undefined;
@@ -148,7 +148,7 @@ export default function StudyDashboard({ kind }: { kind: "quiz" | "flashcards" }
                 style={{ color: c.mainFg }}>
                 <Upload size={34} strokeWidth={1.5} style={{ color: "#9b7bff" }} />
                 <span className="font-medium">{uploading ? (progress < 100 ? `Uploading ${progress}%` : "Processing document...") : "Upload a document"}</span>
-                <span className="text-xs" style={{ color: c.mainSub }}>PDF, Word, PowerPoint, text or images - Up to 20 MB</span>
+                <span className="text-xs" style={{ color: c.mainSub }}>PDF, Word, PowerPoint, text or images - Up to 10 MB</span>
               </button>
               {documents.length > 0 && <details className="mb-4" open={!!documentId}>
                 <summary className="cursor-pointer text-sm" style={{ color: c.mainSub }}>Use an uploaded document</summary>

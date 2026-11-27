@@ -50,8 +50,8 @@ export default function DashboardPage() {
   const handleFileChosen = async (file: File | undefined) => {
     if (!file) return;
     setError(null);
-    if (file.size > 20 * 1024 * 1024) {
-      setError("Files must be 20 MB or smaller.");
+    if (file.size > 10 * 1024 * 1024) {
+      setError("Files must be 10 MB or smaller.");
       if (fileInputRef.current) fileInputRef.current.value = "";
       return;
     }
@@ -155,7 +155,7 @@ export default function DashboardPage() {
                   Your documents
                 </h1>
                 <p className="text-[13px] mt-1" style={{ color: c.mainSub }}>
-                  Upload files up to 20 MB, then generate quizzes and flashcards from supported study materials.
+                  Upload files up to 10 MB, then generate quizzes and flashcards from supported study materials.
                 </p>
               </div>
               <div>
@@ -196,7 +196,7 @@ export default function DashboardPage() {
               >
                 <FileText size={28} strokeWidth={1.5} style={{ color: c.mainSub, margin: "0 auto" }} />
                 <p className="text-sm mt-3" style={{ color: c.mainSub }}>
-                  No documents yet. Upload a file up to 20 MB to get started.
+                  No documents yet. Upload a file up to 10 MB to get started.
                 </p>
               </div>
             ) : (

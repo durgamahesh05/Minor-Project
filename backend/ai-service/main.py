@@ -1,8 +1,7 @@
 """Synapse AI service (scaffold).
 
-Not wired up to the Node/Express backend yet. Once RAG is implemented, the
-Express backend's generateAssistantReply() (backend/src/routes/chat.routes.js)
-should call this service's /api/rag/query instead of returning a stub reply.
+Standalone RAG service scaffold. The active application API and RAG pipeline
+run from backend/main.py.
 """
 
 import os
