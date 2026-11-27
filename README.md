@@ -70,7 +70,8 @@ The following table summarizes the backend settings. The checked-in [backend/.en
 | `MONGODB_URI` | Yes | MongoDB connection URI; URL-encode reserved characters in credentials. |
 | `MONGODB_DATABASE` | No | Database name; defaults to `SynapseAI`. |
 | `SESSION_SECRET` | Yes for deployment | Secret used to sign browser sessions. Set a unique, long random value. |
-| `CLIENT_URL` | Yes for deployment | Exact frontend origin allowed by the API CORS policy. |
+| `CLIENT_URL` | Yes for deployment | Comma-separated frontend origins allowed by the API CORS policy. Do not include paths or trailing slashes. |
+| `VERCEL_PREVIEW_ORIGIN_REGEX` | Optional | Anchored regex for this project's Vercel preview origins. Scope it to your project and team. |
 | `GROQ_API_KEY` | For AI features | Key for chat, study generation, and image understanding. |
 | `VECTOR_STORE` | No | Vector adapter: `supabase` (default), `chroma`, or `qdrant`. |
 | `SUPABASE_DB_URL` | When using Supabase | Backend PostgreSQL connection string; role needs extension, schema, table, index, and grant privileges. |
@@ -81,7 +82,7 @@ The following table summarizes the backend settings. The checked-in [backend/.en
 
 The Supabase connection is used by the backend to create and access the pgvector extension and application tables. Keep database URLs, API keys, and session secrets out of frontend environment variables and version control.
 
-To send account emails, also configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, and optionally `SMTP_FROM`. `ENVIRONMENT=production` disables development OTP disclosure. For non-local deployments set `CLIENT_URL` to the exact frontend origin and use a strong unique `SESSION_SECRET`.
+To send account emails, also configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, and optionally `SMTP_FROM`. `ENVIRONMENT=production` disables development OTP disclosure and enables secure cross-site session cookies. Set `CLIENT_URL` to the frontend origin(s), separated by commas, and use a strong unique `SESSION_SECRET`. If you use Vercel preview deployments, set `VERCEL_PREVIEW_ORIGIN_REGEX` to an anchored expression matching only preview URLs for your project and team. For example, `^https://minor-project-[a-z0-9]+-your-team-projects\.vercel\.app$`.
 
 Run the API from the `backend` directory:
 

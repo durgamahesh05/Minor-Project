@@ -56,8 +56,30 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 logging.basicConfig(level=logging.INFO)
 load_dotenv(Path(__file__).resolve().parent / ".env")
 app: FastAPI = FastAPI(title="Synapse API", lifespan=lifespan)
-app.add_middleware(SessionMiddleware, secret_key=os.getenv("SESSION_SECRET", "replace-in-production"), max_age=604800)
-app.add_middleware(CORSMiddleware, allow_origins=[os.getenv("CLIENT_URL", "http://localhost:5173")], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+is_production = os.getenv("ENVIRONMENT", "development").lower() == "production"
+session_secret = os.getenv("SESSION_SECRET", "replace-in-production")
+if is_production and session_secret == "replace-in-production":
+ raise RuntimeError("Set SESSION_SECRET to a unique random value in production.")
+app.add_middleware(
+ SessionMiddleware,
+ secret_key=session_secret,
+ max_age=604800,
+ same_site="none" if is_production else "lax",
+ https_only=is_production,
+)
+client_origins = [
+ origin.strip().rstrip("/")
+ for origin in os.getenv("CLIENT_URL", "http://localhost:5173").split(",")
+ if origin.strip()
+]
+app.add_middleware(
+ CORSMiddleware,
+ allow_origins=client_origins,
+ allow_origin_regex=os.getenv("VERCEL_PREVIEW_ORIGIN_REGEX") or None,
+ allow_credentials=True,
+ allow_methods=["*"],
+ allow_headers=["*"],
+)
 mongo_client=create_mongo_client()
 db=get_database(mongo_client);app.state.db=db; uploads=Path(__file__).parent/"uploads"
 
