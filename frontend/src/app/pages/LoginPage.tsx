@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { Link, useNavigate } from "react-router";
+import { Link, useLocation, useNavigate } from "react-router";
 import { Brain } from "lucide-react";
 import { useAuth, ApiError } from "../context/AuthContext";
 import { Button } from "../components/ui/button";
@@ -11,6 +11,10 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../co
 export default function LoginPage() {
   const { login } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  // Only same-app paths are honoured, never external URLs.
+  const from = (location.state as { from?: string } | null)?.from;
+  const returnTo = from && from.startsWith("/") && !from.startsWith("//") ? from : null;
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -24,7 +28,7 @@ export default function LoginPage() {
     void import("./ChatPage").catch(() => {});
     try {
       const user = await login(email, password);
-      navigate(user.role === "admin" ? "/admin" : "/chat");
+      navigate(returnTo ?? (user.role === "admin" ? "/admin" : "/chat"), { replace: Boolean(returnTo) });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong");
     } finally {

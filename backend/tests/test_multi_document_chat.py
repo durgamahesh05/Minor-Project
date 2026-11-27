@@ -23,7 +23,7 @@ def test_five_documents_are_passed_to_answer_and_saved(monkeypatch):
     rag.answer.return_value.answer = "Combined explanation"
     monkeypatch.setattr(main, "get_rag", lambda _: rag)
     result = main.message(str(ObjectId()), main.Data(text="Compare all files", documentIds=list(map(str, ids))), {"_id": uid})
-    rag.answer.assert_called_once_with("Compare all files", uid, document_ids=ids, response_level="simple")
+    rag.answer.assert_called_once_with("Compare all files", uid, document_ids=ids, response_level="simple", language=None)
     assert [item["id"] for item in result["userMessage"]["attachments"]] == list(map(str, ids))
 
 

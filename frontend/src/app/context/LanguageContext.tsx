@@ -1,18 +1,26 @@
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { LANGUAGE_STORAGE_KEY, languages } from "../i18n";
+import { LANGUAGE_STORAGE_KEY, initialLanguageSetting, resolveLanguage, type LanguageSetting } from "../i18n";
 
-type Language = (typeof languages)[number]["value"];
-const LanguageContext = createContext<{ language: Language; setLanguage: (language: Language) => void } | undefined>(undefined);
+type Language = LanguageSetting;
+type LanguageValue = {
+  /** The user's choice, including "auto". Sent to the AI: "auto" answers in the language the user writes in. */
+  language: Language;
+  /** The language the UI is shown in. */
+  resolvedLanguage: string;
+  setLanguage: (language: Language) => void;
+};
+const LanguageContext = createContext<LanguageValue | undefined>(undefined);
 
 export function LanguageProvider({ children }: { children: ReactNode }) {
   const { i18n } = useTranslation();
-  const [language, setLanguageState] = useState<Language>(() => (localStorage.getItem(LANGUAGE_STORAGE_KEY) as Language) || "auto");
+  const [language, setLanguageState] = useState<Language>(initialLanguageSetting);
   const setLanguage = (next: Language) => {
-    setLanguageState(next); localStorage.setItem(LANGUAGE_STORAGE_KEY, next);
-    void i18n.changeLanguage(next === "auto" ? navigator.language.split("-")[0] : next);
+    setLanguageState(next);
+    try { localStorage.setItem(LANGUAGE_STORAGE_KEY, next); } catch { /* private mode: keep it for this session */ }
+    void i18n.changeLanguage(resolveLanguage(next));
   };
-  return <LanguageContext.Provider value={{ language, setLanguage }}>{children}</LanguageContext.Provider>;
+  return <LanguageContext.Provider value={{ language, resolvedLanguage: resolveLanguage(language), setLanguage }}>{children}</LanguageContext.Provider>;
 }
 
 export function useLanguage() {

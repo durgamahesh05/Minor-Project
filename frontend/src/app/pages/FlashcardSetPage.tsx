@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useParams, Link } from "react-router";
+import { useLocation, useNavigate, useParams, Link } from "react-router";
+import { useTranslation } from "react-i18next";
 import { ArrowLeft, ChevronLeft, ChevronRight, RotateCw } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { api, type FlashcardSet } from "../lib/api";
+import { isSlowConnection, studyCache } from "../lib/studyCache";
 import { getThemeColors, JK } from "../lib/theme";
 import { useTheme } from "../context/ThemeContext";
 import Sidebar from "../components/layout/Sidebar";
@@ -12,6 +14,9 @@ export default function FlashcardSetPage() {
   const { id } = useParams<{ id: string }>();
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const { t } = useTranslation();
+  const cacheUser = user?.id ?? "anonymous";
 
   const { theme } = useTheme();
   const [sidebarOpen, setSidebarOpen] = useState(() => window.matchMedia("(min-width: 768px)").matches);
@@ -25,16 +30,29 @@ export default function FlashcardSetPage() {
 
   useEffect(() => {
     if (!id) return;
-    setLoading(true);
+    let active = true;
     setError(null);
     setIndex(0);
     setFlipped(false);
+    // A just-generated set arrives with the navigation; otherwise use the cached copy.
+    const handedOver = (location.state as { item?: FlashcardSet } | null)?.item;
+    const known = handedOver?.id === id ? handedOver : studyCache.item<FlashcardSet>(cacheUser, "flashcards", id);
+    setSet(known ?? null);
+    setLoading(!known);
+    if (known) studyCache.setItem(cacheUser, "flashcards", known);
+    // Card content never changes after generation; skip the refresh on slow connections.
+    if (known && isSlowConnection()) return;
     api
       .getFlashcardSet(id)
-      .then(({ set }) => setSet(set))
-      .catch(error => setError(error instanceof Error ? error.message : "Unable to load study materials."))
-      .finally(() => setLoading(false));
-  }, [id]);
+      .then(({ set }) => {
+        studyCache.setItem(cacheUser, "flashcards", set);
+        if (active) setSet(set);
+      })
+      .catch(error => { if (active && !known) setError(error instanceof Error ? error.message : t("study.loadError")); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, cacheUser]);
 
   const handleLogout = async () => {
     await logout();
@@ -66,12 +84,12 @@ export default function FlashcardSetPage() {
           <div className="max-w-[680px] mx-auto space-y-6">
             <Link to="/flashcards" className="text-[13px] flex items-center gap-1.5" style={{ color: c.mainSub }}>
               <ArrowLeft size={14} strokeWidth={2} />
-              All flashcard sets
+              {t("flashcards.all")}
             </Link>
 
             {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : loading || !set ? (
               <p className="text-sm" style={{ color: c.mainSub }}>
-                Loading…
+                {t("loading")}
               </p>
             ) : (
               <>
@@ -79,7 +97,7 @@ export default function FlashcardSetPage() {
                   {set.title}
                 </h1>
 
-                {set.cards.length === 0 && <p style={{ color: c.mainSub }}>This set has no cards. Generate a new set from your documents.</p>}
+                {set.cards.length === 0 && <p style={{ color: c.mainSub }}>{t("flashcards.empty")}</p>}
                 {card && (
                   <div className="flex flex-col items-center gap-4">
                     <button
@@ -89,7 +107,7 @@ export default function FlashcardSetPage() {
                     >
                       <div>
                         <p className="text-[11px] font-mono uppercase tracking-wide mb-3" style={{ color: c.mainSub }}>
-                          {flipped ? "Answer" : "Question"} · {index + 1} / {set.cards.length}
+                          {flipped ? t("flashcards.answer") : t("flashcards.question")} · {index + 1} / {set.cards.length}
                         </p>
                         <p className="text-[16px]" style={{ color: c.mainFg, ...JK }}>
                           {flipped ? card.back : card.front}
@@ -99,7 +117,7 @@ export default function FlashcardSetPage() {
 
                     <div className="flex items-center gap-3">
                       <button
-                        aria-label="Previous card"
+                        aria-label={t("flashcards.previous")}
                         onClick={() => goTo(index - 1)}
                         disabled={index === 0}
                         className="p-2 rounded-lg transition-opacity hover:opacity-70 disabled:opacity-30"
@@ -113,10 +131,10 @@ export default function FlashcardSetPage() {
                         style={{ background: c.chipBg, border: `1px solid ${c.chipBorder}`, color: c.mainFg }}
                       >
                         <RotateCw size={14} strokeWidth={2} />
-                        Flip
+                        {t("flashcards.flip")}
                       </button>
                       <button
-                        aria-label="Next card"
+                        aria-label={t("flashcards.next")}
                         onClick={() => goTo(index + 1)}
                         disabled={index === set.cards.length - 1}
                         className="p-2 rounded-lg transition-opacity hover:opacity-70 disabled:opacity-30"

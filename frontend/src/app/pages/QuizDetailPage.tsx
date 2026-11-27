@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useParams, Link } from "react-router";
+import { useLocation, useNavigate, useParams, Link } from "react-router";
+import { useTranslation } from "react-i18next";
 import { ArrowLeft, Check, X } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { api, type Quiz } from "../lib/api";
+import { isSlowConnection, studyCache } from "../lib/studyCache";
 import { getThemeColors, JK } from "../lib/theme";
 import { useTheme } from "../context/ThemeContext";
 import Sidebar from "../components/layout/Sidebar";
@@ -12,6 +14,9 @@ export default function QuizDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const { t } = useTranslation();
+  const cacheUser = user?.id ?? "anonymous";
 
   const { theme } = useTheme();
   const [sidebarOpen, setSidebarOpen] = useState(() => window.matchMedia("(min-width: 768px)").matches);
@@ -25,16 +30,29 @@ export default function QuizDetailPage() {
 
   useEffect(() => {
     if (!id) return;
-    setLoading(true);
+    let active = true;
     setError(null);
     setAnswers({});
     setSubmitted(false);
+    // A just-generated quiz arrives with the navigation; otherwise use the cached copy.
+    const handedOver = (location.state as { item?: Quiz } | null)?.item;
+    const known = handedOver?.id === id ? handedOver : studyCache.item<Quiz>(cacheUser, "quiz", id);
+    setQuiz(known ?? null);
+    setLoading(!known);
+    if (known) studyCache.setItem(cacheUser, "quiz", known);
+    // Quiz content never changes after generation; skip the refresh on slow connections.
+    if (known && isSlowConnection()) return;
     api
       .getQuiz(id)
-      .then(({ quiz }) => setQuiz(quiz))
-      .catch(error => setError(error instanceof Error ? error.message : "Unable to load study materials."))
-      .finally(() => setLoading(false));
-  }, [id]);
+      .then(({ quiz }) => {
+        studyCache.setItem(cacheUser, "quiz", quiz);
+        if (active) setQuiz(quiz);
+      })
+      .catch(error => { if (active && !known) setError(error instanceof Error ? error.message : t("study.loadError")); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, cacheUser]);
 
   const handleLogout = async () => {
     await logout();
@@ -60,12 +78,12 @@ export default function QuizDetailPage() {
           <div className="max-w-[680px] mx-auto space-y-6">
             <Link to="/quiz" className="text-[13px] flex items-center gap-1.5" style={{ color: c.mainSub }}>
               <ArrowLeft size={14} strokeWidth={2} />
-              All quizzes
+              {t("quiz.all")}
             </Link>
 
             {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : loading || !quiz ? (
               <p className="text-sm" style={{ color: c.mainSub }}>
-                Loading…
+                {t("loading")}
               </p>
             ) : (
               <>
@@ -76,7 +94,7 @@ export default function QuizDetailPage() {
                 {submitted && (
                   <div className="rounded-xl p-4" style={{ background: c.chipBg, border: `1px solid ${c.chipBorder}` }}>
                     <p className="text-sm font-semibold" style={{ color: c.mainFg }}>
-                      Score: {score} / {quiz.questions.length}
+                      {t("quiz.score", { score, total: quiz.questions.length })}
                     </p>
                   </div>
                 )}
@@ -120,7 +138,7 @@ export default function QuizDetailPage() {
                   })}
                 </div>
 
-                {submitted && <button onClick={() => { setAnswers({}); setSubmitted(false); }} className="rounded-full border px-5 py-2 text-sm" style={{ color: c.mainFg, borderColor: c.chipBorder }}>Try again</button>}
+                {submitted && <button onClick={() => { setAnswers({}); setSubmitted(false); }} className="rounded-full border px-5 py-2 text-sm" style={{ color: c.mainFg, borderColor: c.chipBorder }}>{t("quiz.tryAgain")}</button>}
                 {!submitted && (
                   <button
                     onClick={() => setSubmitted(true)}
@@ -128,7 +146,7 @@ export default function QuizDetailPage() {
                     className="px-5 py-2 rounded-full text-[13px] font-semibold transition-opacity hover:opacity-90 disabled:opacity-40"
                     style={{ background: "#7c5af0", color: "#ffffff" }}
                   >
-                    Submit
+                    {t("quiz.submit")}
                   </button>
                 )}
               </>

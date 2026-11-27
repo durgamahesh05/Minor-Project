@@ -15,9 +15,21 @@ from vectorstore.qdrant import QdrantVectorStore
 from vectorstore.chroma import ChromaVectorStore
 from vectorstore.supabase import SupabaseVectorStore
 from rag.resources import resources
-from rag.response_policy import ResponseLevel, response_policy
+from rag.response_policy import ResponseLevel, language_name, response_policy
 
 logger = logging.getLogger(__name__)
+
+NOT_FOUND = {
+    "English": "I could not find relevant information in your uploaded documents.",
+    "Hindi": "मुझे आपके अपलोड किए गए दस्तावेज़ों में इससे जुड़ी जानकारी नहीं मिली।",
+    "Telugu": "మీరు అప్‌లోడ్ చేసిన పత్రాల్లో సంబంధిత సమాచారం దొరకలేదు.",
+    "Spanish": "No encontré información relevante en tus documentos subidos.",
+    "French": "Je n'ai trouvé aucune information pertinente dans vos documents importés.",
+}
+
+
+def not_found_message(language: str | None = None) -> str:
+    return NOT_FOUND.get(language_name(language) or "English", NOT_FOUND["English"])
 
 SUMMARY_PROMPT = """Summarize this document element concisely for semantic retrieval.
 Preserve names, facts, numbers, and relationships. Return only the summary.
@@ -47,6 +59,46 @@ Answer the user naturally. Do not claim to have searched uploaded documents.
 User: {question}"""
 
 
+DEFAULT_FALLBACK_MODELS = "openai/gpt-oss-120b,openai/gpt-oss-20b"
+
+
+def _groq(model: str, **options):
+    from langchain_groq import ChatGroq
+
+    key = os.getenv("GROQ_API_KEY")
+    return ChatGroq(model=model, temperature=0.2, api_key=SecretStr(key) if key else None, **options)
+
+
+def build_text_model():
+    """Primary Groq model, handing off to other models when it is rate limited.
+
+    Groq limits are per model; on the free tier one model allows only ~1000
+    output tokens per minute, so retrying the same model waits 40s+. Switching
+    to a fallback model answers in about a second instead.
+    """
+    primary = os.getenv("GROQ_TEXT_MODEL", "qwen/qwen3.8-27b")
+    names = [name.strip() for name in os.getenv("GROQ_FALLBACK_MODELS", DEFAULT_FALLBACK_MODELS).split(",")]
+    names = list(dict.fromkeys(name for name in names if name and name != primary))
+    if not names:
+        return _groq(primary)
+    import groq
+
+    models = [_groq(primary, max_retries=0)]
+    for position, name in enumerate(names):
+        last = position == len(names) - 1
+        # gpt-oss models reason before answering; low effort keeps them fast and cheap.
+        options = {"reasoning_effort": "low"} if name.startswith("openai/gpt-oss") else {}
+        models.append(_groq(name, max_retries=2 if last else 0, **options))
+    handled = (groq.RateLimitError, groq.InternalServerError, groq.APIConnectionError, groq.APITimeoutError)
+    return models[0].with_fallbacks(models[1:], exceptions_to_handle=handled)
+
+
+def with_language(prompt: str, language: str | None) -> str:
+    """Repeat an explicit language choice last, where the model weighs it most."""
+    name = language_name(language)
+    return f"{prompt}\n\nWrite your entire answer in {name}." if name else prompt
+
+
 @dataclass(frozen=True)
 class RAGAnswer:
     answer: str
@@ -57,14 +109,13 @@ class MultimodalRAG:
     def __init__(self, database):
         from langchain_core.output_parsers import StrOutputParser
         from langchain_core.prompts import ChatPromptTemplate
-        from langchain_groq import ChatGroq
 
         self.database = database
         self.embedder = Embedder()
         self._vectorstore = None
         self._vectorstore_lock = Lock()
-        self.text_model = ChatGroq(model=os.getenv("GROQ_TEXT_MODEL", "qwen/qwen3.8-27b"), temperature=0.2, api_key=SecretStr(os.environ["GROQ_API_KEY"]) if os.getenv("GROQ_API_KEY") else None)
-        self.vision_model = ChatGroq(model=os.getenv("GROQ_VISION_MODEL", "qwen/qwen3.8-27b"), temperature=0.2, timeout=30, max_retries=1, api_key=SecretStr(os.environ["GROQ_API_KEY"]) if os.getenv("GROQ_API_KEY") else None)
+        self.text_model = build_text_model()
+        self.vision_model = _groq(os.getenv("GROQ_VISION_MODEL", "qwen/qwen3.8-27b"), timeout=30, max_retries=1)
         self.summary_chain = ChatPromptTemplate.from_template(SUMMARY_PROMPT) | self.text_model | StrOutputParser()
 
     @property
@@ -169,16 +220,18 @@ class MultimodalRAG:
         result = str(self.text_model.invoke(ROUTER_PROMPT.format(question=question)).content).strip().upper()
         return "DOCUMENT" if result.startswith("DOCUMENT") else "GENERAL"
 
-    def general_answer(self, question: str, response_level: ResponseLevel = "simple") -> RAGAnswer:
+    def general_answer(self, question: str, response_level: ResponseLevel = "simple", language: str | None = None) -> RAGAnswer:
         from langchain_core.messages import SystemMessage, HumanMessage
-        policy = response_policy(question, response_level)
-        response = self.text_model.bind(max_tokens=policy.max_tokens).invoke([SystemMessage(content=policy.instruction), HumanMessage(content=GENERAL_PROMPT.format(question=question))])
+        policy = response_policy(question, response_level, language)
+        response = self.text_model.bind(max_tokens=policy.max_tokens).invoke([SystemMessage(content=policy.instruction), HumanMessage(content=with_language(GENERAL_PROMPT.format(question=question), language))])
         return RAGAnswer(str(response.content), [])
 
-    def chat(self, question: str, user_id: ObjectId, document_id: ObjectId | None = None, response_level: ResponseLevel = "simple") -> RAGAnswer:
-        return self.answer(question, user_id, document_id=document_id, response_level=response_level) if document_id is not None or self.route(question) == "DOCUMENT" else self.general_answer(question, response_level=response_level)
+    def chat(self, question: str, user_id: ObjectId, document_id: ObjectId | None = None, response_level: ResponseLevel = "simple", language: str | None = None) -> RAGAnswer:
+        if document_id is not None or self.route(question) == "DOCUMENT":
+            return self.answer(question, user_id, document_id=document_id, response_level=response_level, language=language)
+        return self.general_answer(question, response_level=response_level, language=language)
 
-    def answer(self, question: str, user_id: ObjectId, document_id: ObjectId | None = None, response_level: ResponseLevel = "simple", document_ids: list[ObjectId] | None = None) -> RAGAnswer:
+    def answer(self, question: str, user_id: ObjectId, document_id: ObjectId | None = None, response_level: ResponseLevel = "simple", document_ids: list[ObjectId] | None = None, language: str | None = None) -> RAGAnswer:
         from langchain_core.messages import HumanMessage
 
         if document_ids:
@@ -188,7 +241,7 @@ class MultimodalRAG:
         else:
             elements = self.retrieve(question, user_id, document_id=document_id)
         if not elements:
-            return RAGAnswer("I could not find relevant information in your uploaded documents.", [])
+            return RAGAnswer(not_found_message(language), [])
         context_parts = []
         image_parts = []
         sources = []
@@ -205,9 +258,9 @@ class MultimodalRAG:
                     label += f", page {source['page']}"
                 text = element.get("summary", "Image") if element["kind"] == "image" else element["content"]
                 context_parts.append(f"[{label}; {element['kind']}]\n{text}")
-        prompt = ANSWER_PROMPT.format(context="\n\n".join(context_parts), question=question)
+        prompt = with_language(ANSWER_PROMPT.format(context="\n\n".join(context_parts), question=question), language)
         from langchain_core.messages import SystemMessage
-        policy = response_policy(question, response_level)
+        policy = response_policy(question, response_level, language)
         model = self.vision_model if image_parts else self.text_model
         content = [{"type": "text", "text": prompt}, *image_parts] if image_parts else prompt
         response = model.bind(max_tokens=policy.max_tokens).invoke([SystemMessage(content=policy.instruction), HumanMessage(content=content)])

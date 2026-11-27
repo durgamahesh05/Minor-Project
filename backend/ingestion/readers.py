@@ -26,6 +26,12 @@ class WordReader(DocumentReader):
         return read_docx(content)
 
 
+class LegacyWordReader(DocumentReader):
+    def read(self, content: bytes) -> str:
+        from .doc_reader import read_doc
+        return read_doc(content)
+
+
 class PowerPointReader(DocumentReader):
     def read(self, content: bytes) -> str:
         from .pptx_reader import read_pptx

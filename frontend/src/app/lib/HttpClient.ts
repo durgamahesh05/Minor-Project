@@ -26,7 +26,14 @@ export class HttpClient {
       xhr.onload = () => {
         let result;
         try { result = JSON.parse(xhr.responseText); }
-        catch { reject(new ApiError(xhr.status, "The server returned an invalid upload response.")); return; }
+        catch {
+          // Proxies return HTML/plain-text errors (e.g. 413 Request Entity Too Large).
+          const message = xhr.status === 413 ? "The file is larger than the server accepts."
+            : xhr.status >= 400 ? `Upload failed (${xhr.status}${xhr.statusText ? ` ${xhr.statusText}` : ""}).`
+            : "The server returned an invalid upload response.";
+          reject(new ApiError(xhr.status, message));
+          return;
+        }
         if (xhr.status >= 200 && xhr.status < 300) resolve(result as T);
         else reject(new ApiError(xhr.status, result?.detail ?? result?.message ?? "Upload failed."));
       };

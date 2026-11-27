@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "./ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { Button } from "./ui/button";
@@ -9,25 +9,50 @@ import { api, ApiError } from "../lib/api";
 import { languages } from "../i18n";
 import { useLanguage } from "../context/LanguageContext";
 import { clearAllLocalDocuments } from "../lib/documentStorage";
+import { useTranslation } from "react-i18next";
+import { formatTime, OTP_LENGTH, otpInputProps, useOtpTimers } from "../lib/otp";
 
 type DeleteStep = "idle" | "confirm" | "otp" | "deleting" | "done";
 
-export default function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+type Props = {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  /** Code from the "Confirm Account Deletion" email link; opens the confirmation step pre-filled. */
+  initialDeleteCode?: string;
+};
+
+export default function SettingsDialog({ open, onOpenChange, initialDeleteCode }: Props) {
   const { mode, setMode } = useTheme();
   const { language, setLanguage } = useLanguage();
+  const { t } = useTranslation();
+  const languageLabel = (value: string) => value === "auto" ? t("settingsDialog.autoDetect") : languages.find(l => l.value === value)?.label;
   const [deleteStep, setDeleteStep] = useState<DeleteStep>("idle");
   const [devOtp, setDevOtp] = useState<string | null>(null);
   const [otpInput, setOtpInput] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [requesting, setRequesting] = useState(false);
+  const timers = useOtpTimers();
+
+  useEffect(() => {
+    if (open && initialDeleteCode) {
+      setDeleteStep("otp");
+      setOtpInput(initialDeleteCode.replace(/\D/g, "").slice(0, OTP_LENGTH));
+    }
+  }, [open, initialDeleteCode]);
 
   const handleRequestDelete = async () => {
     setError(null);
+    setRequesting(true);
     try {
-      const { otp } = await api.requestAccountDeletion();
-      setDevOtp(otp ?? null);
+      const result = await api.requestAccountDeletion();
+      setDevOtp(result.otp ?? null);
+      timers.start(result);
+      setOtpInput("");
       setDeleteStep("otp");
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Something went wrong");
+      setError(err instanceof ApiError ? err.message : t("common.somethingWrong"));
+    } finally {
+      setRequesting(false);
     }
   };
 
@@ -40,7 +65,7 @@ export default function SettingsDialog({ open, onOpenChange }: { open: boolean; 
       setDeleteStep("done");
       window.location.href = "/";
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Something went wrong");
+      setError(err instanceof ApiError ? err.message : t("common.somethingWrong"));
       setDeleteStep("otp");
     }
   };
@@ -56,8 +81,8 @@ export default function SettingsDialog({ open, onOpenChange }: { open: boolean; 
     <Dialog open={open} onOpenChange={next => { onOpenChange(next); if (!next) resetDeleteFlow(); }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Settings</DialogTitle>
-          <DialogDescription>General</DialogDescription>
+          <DialogTitle>{t("settings")}</DialogTitle>
+          <DialogDescription>{t("settingsDialog.general")}</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-3">
@@ -65,8 +90,8 @@ export default function SettingsDialog({ open, onOpenChange }: { open: boolean; 
             <div className="flex items-center gap-3">
               {mode === "dark" ? <Moon size={16} /> : mode === "light" ? <Sun size={16} /> : <Laptop size={16} />}
               <div>
-                <p className="text-sm font-medium">Appearance</p>
-                <p className="text-xs text-muted-foreground capitalize">{mode}</p>
+                <p className="text-sm font-medium">{t("settingsDialog.appearance")}</p>
+                <p className="text-xs text-muted-foreground">{t("settingsDialog." + mode)}</p>
               </div>
             </div>
             <Select value={mode} onValueChange={v => setMode(v as ThemeMode)}>
@@ -74,9 +99,9 @@ export default function SettingsDialog({ open, onOpenChange }: { open: boolean; 
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="system">System</SelectItem>
-                <SelectItem value="light">Light</SelectItem>
-                <SelectItem value="dark">Dark</SelectItem>
+                <SelectItem value="system">{t("settingsDialog.system")}</SelectItem>
+                <SelectItem value="light">{t("settingsDialog.light")}</SelectItem>
+                <SelectItem value="dark">{t("settingsDialog.dark")}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -85,8 +110,8 @@ export default function SettingsDialog({ open, onOpenChange }: { open: boolean; 
             <div className="flex items-center gap-3">
               <Languages size={16} />
               <div>
-                <p className="text-sm font-medium">Language</p>
-                <p className="text-xs text-muted-foreground">{languages.find(l => l.value === language)?.label}</p>
+                <p className="text-sm font-medium">{t("settingsDialog.language")}</p>
+                <p className="text-xs text-muted-foreground">{languageLabel(language)}</p>
               </div>
             </div>
             <Select value={language} onValueChange={value => setLanguage(value as typeof language)}>
@@ -96,7 +121,7 @@ export default function SettingsDialog({ open, onOpenChange }: { open: boolean; 
               <SelectContent>
                 {languages.map(l => (
                   <SelectItem key={l.value} value={l.value}>
-                    {l.label}
+                    {languageLabel(l.value)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -107,17 +132,16 @@ export default function SettingsDialog({ open, onOpenChange }: { open: boolean; 
         <div className="mt-2 rounded-lg border border-destructive/30 p-4 space-y-3">
           <div className="flex items-center gap-2 text-destructive">
             <ShieldAlert size={16} />
-            <p className="text-sm font-semibold">Danger zone</p>
+            <p className="text-sm font-semibold">{t("settingsDialog.dangerZone")}</p>
           </div>
 
           {deleteStep === "idle" && (
             <>
               <p className="text-xs text-muted-foreground">
-                Permanently delete your account and everything in it — chats, documents, quizzes, and flashcards. This
-                email can't be used to sign up again for 30 days.
+                {t("settingsDialog.deleteWarning")}
               </p>
               <Button variant="destructive" size="sm" onClick={() => setDeleteStep("confirm")}>
-                Delete account
+                {t("settingsDialog.deleteAccount")}
               </Button>
             </>
           )}
@@ -125,16 +149,17 @@ export default function SettingsDialog({ open, onOpenChange }: { open: boolean; 
           {deleteStep === "confirm" && (
             <>
               <p className="text-xs text-muted-foreground">
-                This can't be undone. We'll send a verification code to confirm it's really you.
+                {t("settingsDialog.confirmWarning")}
               </p>
               <div className="flex gap-2">
-                <Button variant="destructive" size="sm" onClick={handleRequestDelete}>
-                  Yes, send me a code
+                <Button variant="destructive" size="sm" onClick={handleRequestDelete} disabled={requesting}>
+                  {requesting ? t("settingsDialog.sending") : t("settingsDialog.sendCode")}
                 </Button>
                 <Button variant="outline" size="sm" onClick={resetDeleteFlow}>
-                  Cancel
+                  {t("common.cancel")}
                 </Button>
               </div>
+              {error && <p className="text-xs text-destructive">{error}</p>}
             </>
           )}
 
@@ -142,29 +167,34 @@ export default function SettingsDialog({ open, onOpenChange }: { open: boolean; 
             <>
               {devOtp && (
                 <p className="text-xs text-muted-foreground rounded-md border p-2">
-                  No email service is configured yet (dev mode) — your verification code is{" "}
+                  {t("settingsDialog.devCode")}{" "}
                   <span className="font-mono font-semibold text-foreground">{devOtp}</span>.
                 </p>
               )}
               <Input
-                placeholder="6-digit code"
-                value={otpInput}
-                onChange={e => setOtpInput(e.target.value)}
-                maxLength={6}
+                placeholder={t("settingsDialog.codePlaceholder")}
+                aria-label={t("settingsDialog.codePlaceholder")}
+                {...otpInputProps(otpInput, setOtpInput)}
                 disabled={deleteStep === "deleting"}
               />
+              <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground" aria-live="polite">
+                <span>{timers.expiresIn > 0 ? t("settingsDialog.expiresIn", { time: formatTime(timers.expiresIn) }) : initialDeleteCode ? "" : t("settingsDialog.codeExpired")}</span>
+                <button type="button" className="underline disabled:opacity-50" disabled={requesting || timers.resendIn > 0 || deleteStep === "deleting"} onClick={handleRequestDelete}>
+                  {timers.resendIn > 0 ? t("settingsDialog.resendIn", { seconds: timers.resendIn }) : t("settingsDialog.resend")}
+                </button>
+              </div>
               {error && <p className="text-xs text-destructive">{error}</p>}
               <div className="flex gap-2">
                 <Button
                   variant="destructive"
                   size="sm"
                   onClick={handleConfirmDelete}
-                  disabled={otpInput.length !== 6 || deleteStep === "deleting"}
+                  disabled={otpInput.length !== OTP_LENGTH || deleteStep === "deleting"}
                 >
-                  {deleteStep === "deleting" ? "Deleting…" : "Confirm deletion"}
+                  {deleteStep === "deleting" ? t("settingsDialog.deleting") : t("settingsDialog.confirmDeletion")}
                 </Button>
                 <Button variant="outline" size="sm" onClick={resetDeleteFlow} disabled={deleteStep === "deleting"}>
-                  Cancel
+                  {t("common.cancel")}
                 </Button>
               </div>
             </>

@@ -28,27 +28,63 @@ export type Flashcard = { front: string; back: string };
 export type FlashcardSet = { id: string; title: string; documentId: string | null; cards: Flashcard[]; createdAt: string };
 export type FlashcardSetSummary = Omit<FlashcardSet, "cards"> & { itemCount?: number };
 
+/** Every code-sending endpoint returns its timers, so countdowns match the server's rules. */
+export type OtpResult = { message: string; email?: string; otp?: string; expiresIn: number; resendCooldown: number };
+
 export type AdminStats = {
   totalUsers: number;
+  totalAdmins: number;
+  newUsersThisWeek: number;
   totalDocuments: number;
+  indexedDocuments: number;
+  storageBytes: number;
   totalQuizzes: number;
   totalFlashcardSets: number;
   totalConversations: number;
+  totalMessages: number;
+  pendingRegistrations: number;
+  generatedAt: string;
 };
-export type AdminUser = { id: string; name: string; email: string; role: "user" | "admin"; createdAt: string };
+export type AdminUser = {
+  id: string; name: string; email: string; role: "user" | "admin"; createdAt: string; isConfiguredAdmin: boolean;
+  documents: number; quizzes: number; flashcardSets: number; conversations: number;
+};
 export type Owner = { id: string; name: string; email: string } | null;
-export type AdminDocument = { id: string; originalName: string; mimeType: string; size: number; createdAt: string; owner: Owner };
+export type AdminDocument = { id: string; originalName: string; mimeType: string; size: number; status: string; elementCount: number; createdAt: string; owner: Owner };
+export type AdminConversation = { id: string; title: string; messageCount: number; createdAt: string; updatedAt: string; owner: Owner };
+export type AdminSystem = {
+  database: { status: string; latencyMs?: number; error?: string };
+  vectorStore: { provider: string; status: string; vectors?: number; latencyMs?: number; error?: string };
+  ai: { configured: boolean; model: string; fallbacks: string[] };
+  email: { configured: boolean; sent: number; failed: number; lastSentAt: string | null; lastErrorAt: string | null; lastError: string | null };
+  otp: { expiresIn: number; resendCooldown: number; maxAttempts: number; codeLength: number };
+  uploads: UploadConfig;
+  adminEmails: number;
+  environment: string;
+};
+type Listing<K extends string, T> = { total: number } & Record<K, T[]>;
+const search = (q?: string) => (q?.trim() ? `?q=${encodeURIComponent(q.trim())}` : "");
 export type AdminQuiz = { id: string; title: string; questionCount: number; createdAt: string; owner: Owner };
 export type AdminFlashcardSet = { id: string; title: string; cardCount: number; createdAt: string; owner: Owner };
 
-export type StudyOptions = { title?: string; prompt?: string; sourceMode?: string };
+export type UploadConfig = {
+  maxFileSizeBytes: number;
+  maxFileSizeMb: number;
+  maxAttachments: number;
+  uploadConcurrency: number;
+  extensions: string[];
+  accept: string;
+  formats: string[];
+};
+
+export type StudyOptions = { title?: string; prompt?: string; sourceMode?: string; language?: string };
 
 export const api = {
   renameStudyMaterial: (kind: "quiz" | "flashcards", id: string, title: string) =>
     request(`/api/${kind === "quiz" ? "quizzes" : "flashcards"}/${id}`, { method: "PATCH", body: JSON.stringify({ title }) }),
   me: () => request<{ user: User }>("/api/auth/me", { signal: AbortSignal.timeout(10000), cache: "no-store" }),
   register: (name: string, email: string, password: string) =>
-    request<{ message: string; email: string; otp?: string }>("/api/auth/register", {
+    request<OtpResult>("/api/auth/register", {
       method: "POST",
       body: JSON.stringify({ name, email, password }),
     }),
@@ -58,7 +94,7 @@ export const api = {
       body: JSON.stringify({ email, otp }),
     }),
   resendRegistrationOtp: (email: string) =>
-    request<{ message: string; otp?: string }>("/api/auth/resend-registration-otp", {
+    request<OtpResult>("/api/auth/resend-registration-otp", {
       method: "POST",
       body: JSON.stringify({ email }),
     }),
@@ -69,12 +105,12 @@ export const api = {
     }),
   logout: () => request<void>("/api/auth/logout", { method: "POST" }),
   forgotPassword: (email: string) =>
-    request<{ message: string; expiresIn: number; resendCooldown: number; otp?: string }>("/api/auth/forgot-password", {
+    request<OtpResult>("/api/auth/forgot-password", {
       method: "POST",
       body: JSON.stringify({ email }),
     }),
   resendPasswordOtp: (email: string) =>
-    request<{ message: string; expiresIn: number; resendCooldown: number; otp?: string }>("/api/auth/resend-password-otp", {
+    request<OtpResult>("/api/auth/resend-password-otp", {
       method: "POST",
       body: JSON.stringify({ email }),
     }),
@@ -109,6 +145,7 @@ export const api = {
       { method: "POST", body: JSON.stringify({ text, language, documentId, documentIds, responseLevel }) },
     ),
 
+  uploadConfig: () => request<UploadConfig>("/api/documents/config", { signal: AbortSignal.timeout(10000) }),
   listDocuments: () => request<{ documents: Document[] }>("/api/documents"),
   uploadDocument: (file: File, clientDocumentId: string, onProgress?: (percent: number) => void) => {
     const formData = new FormData();
@@ -133,16 +170,21 @@ export const api = {
   deleteFlashcardSet: (id: string) => request<void>(`/api/flashcards/${id}`, { method: "DELETE" }),
 
   adminStats: () => request<AdminStats>("/api/admin/stats"),
-  adminListUsers: () => request<{ users: AdminUser[] }>("/api/admin/users"),
+  adminListUsers: (q?: string) => request<Listing<"users", AdminUser>>(`/api/admin/users${search(q)}`),
+  adminSetUserRole: (id: string, role: "user" | "admin") =>
+    request<{ user: User }>(`/api/admin/users/${id}`, { method: "PATCH", body: JSON.stringify({ role }) }),
   adminDeleteUser: (id: string) => request<void>(`/api/admin/users/${id}`, { method: "DELETE" }),
-  adminListDocuments: () => request<{ documents: AdminDocument[] }>("/api/admin/documents"),
+  adminListDocuments: (q?: string) => request<Listing<"documents", AdminDocument>>(`/api/admin/documents${search(q)}`),
   adminDeleteDocument: (id: string) => request<void>(`/api/admin/documents/${id}`, { method: "DELETE" }),
-  adminListQuizzes: () => request<{ quizzes: AdminQuiz[] }>("/api/admin/quizzes"),
+  adminListQuizzes: (q?: string) => request<Listing<"quizzes", AdminQuiz>>(`/api/admin/quizzes${search(q)}`),
   adminDeleteQuiz: (id: string) => request<void>(`/api/admin/quizzes/${id}`, { method: "DELETE" }),
-  adminListFlashcardSets: () => request<{ sets: AdminFlashcardSet[] }>("/api/admin/flashcards"),
+  adminListFlashcardSets: (q?: string) => request<Listing<"sets", AdminFlashcardSet>>(`/api/admin/flashcards${search(q)}`),
   adminDeleteFlashcardSet: (id: string) => request<void>(`/api/admin/flashcards/${id}`, { method: "DELETE" }),
+  adminListConversations: (q?: string) => request<Listing<"conversations", AdminConversation>>(`/api/admin/conversations${search(q)}`),
+  adminDeleteConversation: (id: string) => request<void>(`/api/admin/conversations/${id}`, { method: "DELETE" }),
+  adminSystem: () => request<AdminSystem>("/api/admin/system"),
 
-  requestAccountDeletion: () => request<{ message: string; email: string; otp?: string }>("/api/account/delete/request", { method: "POST" }),
+  requestAccountDeletion: () => request<OtpResult>("/api/account/delete/request", { method: "POST" }),
   confirmAccountDeletion: (otp: string) =>
     request<void>("/api/account/delete/confirm", { method: "POST", body: JSON.stringify({ otp }) }),
 

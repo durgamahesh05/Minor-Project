@@ -25,7 +25,11 @@ def _blocks(container):
 
 
 def read_docx(content: bytes) -> str:
-    document = Document(BytesIO(content))
+    return docx_text(Document(BytesIO(content)))
+
+
+def docx_text(document) -> str:
+    """Extract body, table, header and footer text from a parsed document."""
     blocks = list(_blocks(document))
     seen_parts = set()
     for section in document.sections:

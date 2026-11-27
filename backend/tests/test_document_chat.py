@@ -42,7 +42,7 @@ def test_indexed_document_is_passed_to_rag(monkeypatch):
     rag.chat.return_value.answer = "Explanation"
     monkeypatch.setattr(main, "get_rag", lambda _: rag)
     main.message("conversation", main.Data(text="Explain this file", documentId=str(document_id)), {"_id": user_id})
-    rag.chat.assert_called_once_with("Explain this file", user_id, document_id=document_id, response_level="simple")
+    rag.chat.assert_called_once_with("Explain this file", user_id, document_id=document_id, response_level="simple", language=None)
 
 
 def test_selected_document_bypasses_general_router():
@@ -51,7 +51,7 @@ def test_selected_document_bypasses_general_router():
     user_id, document_id = ObjectId(), ObjectId()
     rag.chat("read this file and explain it", user_id, document_id=document_id)
     rag.route.assert_not_called()
-    rag.answer.assert_called_once_with("read this file and explain it", user_id, document_id=document_id, response_level="simple")
+    rag.answer.assert_called_once_with("read this file and explain it", user_id, document_id=document_id, response_level="simple", language=None)
 
 
 def test_selected_document_retrieval_keeps_low_similarity_and_scopes_both_stores():
