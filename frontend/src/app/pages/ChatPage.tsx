@@ -19,7 +19,7 @@ import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuIte
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "../components/ui/dialog";
 
 export default function ChatPage() {
-  const { user, logout } = useAuth();
+  const { user, loading: authLoading, logout } = useAuth();
   const navigate = useNavigate();
 
   const { theme } = useTheme();
@@ -78,8 +78,17 @@ export default function ChatPage() {
   }, []);
 
   useEffect(() => {
-    api.listConversations().then(({ conversations }) => setConversations(conversations)).catch(() => setSendError(t("chatPage.loadHistoryError")));
-  }, []);
+    if (authLoading) return;
+    if (!user) {
+      setConversations([]);
+      return;
+    }
+    let active = true;
+    api.listConversations()
+      .then(({ conversations }) => { if (active) setConversations(conversations); })
+      .catch(() => { if (active) setConversations([]); });
+    return () => { active = false; };
+  }, [authLoading, user?.id]);
 
   useEffect(() => {
     if (!activeConversationId) {
@@ -319,7 +328,7 @@ export default function ChatPage() {
             }} className="absolute -top-10 left-1/2 -translate-x-1/2 flex items-center gap-2 rounded-full border px-3 py-2 text-xs shadow-sm" style={{ background: c.inputBg, color: c.mainFg, borderColor: c.inputBorder }}><ArrowDown size={14} />{t("chatPage.latestMessage")}</button>}
             <div className="max-w-[720px] mx-auto space-y-2">
               <ChatInput key={composerKey} c={c} value={input} onChange={setInput} onSend={handleSend} onDocumentStateChange={updateDocumentState} existingDocuments={activeDocuments} disabled={isTyping || documentProcessing || loadingMessages} />
-              {sendError && <p role="alert" className="text-sm text-red-500">{sendError}</p>}
+              {sendError && <p role="status" className="sr-only">{sendError}</p>}
               <p className="text-[10px] text-center font-mono" style={{ color: c.mainSub }}>
                 {t("disclaimer")}
               </p>

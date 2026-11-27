@@ -28,7 +28,9 @@ function cacheUser(user: User | null) {
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(cachedUser);
-  const [loading, setLoading] = useState(!user);
+  // Keep protected routes behind the session check, even when a cached profile
+  // is available. The cached profile keeps the UI stable if the API is waking.
+  const [loading, setLoading] = useState(true);
   const revision = useRef(0);
 
   useEffect(() => {
@@ -37,7 +39,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     api
       .me()
       .then(({ user }) => { if (active && current === revision.current) { setUser(user); cacheUser(user); } })
-      .catch(() => { if (active && current === revision.current) { setUser(null); cacheUser(null); } })
+      .catch((error: unknown) => {
+        if (!active || current !== revision.current) return;
+        // A cold start/network failure does not invalidate the browser session.
+        // Only clear a cached login when the API explicitly rejects it.
+        if (error instanceof ApiError && error.status === 401) {
+          setUser(null);
+          cacheUser(null);
+        }
+      })
       .finally(() => { if (active && current === revision.current) setLoading(false); });
     return () => { active = false; };
   }, []);
