@@ -55,7 +55,7 @@ export type AdminConversation = { id: string; title: string; messageCount: numbe
 export type AdminSystem = {
   database: { status: string; latencyMs?: number; error?: string };
   vectorStore: { provider: string; status: string; vectors?: number; latencyMs?: number; error?: string };
-  ai: { configured: boolean; model: string; fallbacks: string[] };
+  ai: { configured: boolean; keys: number; model: string; fallbacks: string[] };
   email: { configured: boolean; sent: number; failed: number; lastSentAt: string | null; lastErrorAt: string | null; lastError: string | null };
   otp: { expiresIn: number; resendCooldown: number; maxAttempts: number; codeLength: number };
   uploads: UploadConfig;

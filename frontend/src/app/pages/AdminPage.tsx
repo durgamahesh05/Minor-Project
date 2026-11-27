@@ -297,6 +297,7 @@ export default function AdminPage() {
                   ])}
                   {systemCard(Bot, t("admin.system.ai"), system.ai.configured, [
                     ["Groq", system.ai.configured ? t("admin.system.configured") : t("admin.system.notConfigured")],
+                    [t("admin.system.apiKeys"), String(system.ai.keys ?? 0)],
                     [t("admin.system.model"), system.ai.model],
                     [t("admin.system.fallbacks"), system.ai.fallbacks.join(", ") || t("admin.system.none")],
                   ])}

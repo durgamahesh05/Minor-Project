@@ -41,7 +41,8 @@ def close_rag_instances():
 def warm_up_models():
  # Load the embedding model and OCR engine at startup instead of during the first upload.
  try:
-  if os.getenv("GROQ_API_KEY"):get_rag(db).embedder.embed(["warm up"])
+  from rag.pipeline import groq_api_keys
+  if groq_api_keys():get_rag(db).embedder.embed(["warm up"])
  except Exception as error:logging.warning("Embedding model warm-up skipped (%s)",type(error).__name__)
  try:
   from ingestion.image_reader import ocr_engine
@@ -638,9 +639,9 @@ def admin_system(_=Depends(admin)):
  started=clock.perf_counter()
  try:db.command("ping");database={"status":"ok","latencyMs":round((clock.perf_counter()-started)*1000)}
  except Exception as error:database={"status":"error","error":type(error).__name__}
- from rag.pipeline import DEFAULT_FALLBACK_MODELS
+ from rag.pipeline import groq_api_keys, text_model_names
  return {"database":database,"vectorStore":vector_store_status(),
-  "ai":{"configured":bool(os.getenv("GROQ_API_KEY")),"model":os.getenv("GROQ_TEXT_MODEL","qwen/qwen3.8-27b"),"fallbacks":[m.strip() for m in os.getenv("GROQ_FALLBACK_MODELS",DEFAULT_FALLBACK_MODELS).split(",") if m.strip()]},
+  "ai":{"configured":bool(groq_api_keys()),"keys":len(groq_api_keys()),"model":text_model_names()[0],"fallbacks":text_model_names()[1:]},
   "email":{"configured":email_configured(),**outbox.status},
   "otp":otp_config(),"uploads":upload_config(),"adminEmails":len(admin_emails()),"environment":os.getenv("ENVIRONMENT","development").lower()}
 

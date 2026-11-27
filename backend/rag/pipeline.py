@@ -62,35 +62,63 @@ User: {question}"""
 DEFAULT_FALLBACK_MODELS = "openai/gpt-oss-120b,openai/gpt-oss-20b"
 
 
-def _groq(model: str, **options):
+def groq_api_keys() -> list[str]:
+    """GROQ_API_KEY first, then any extra keys in GROQ_API_KEYS (comma-separated)."""
+    keys = [os.getenv("GROQ_API_KEY") or "", *(os.getenv("GROQ_API_KEYS") or "").split(",")]
+    return list(dict.fromkeys(key.strip() for key in keys if key.strip()))
+
+
+def _groq(model: str, key: str | None = None, **options):
     from langchain_groq import ChatGroq
 
-    key = os.getenv("GROQ_API_KEY")
+    key = key or next(iter(groq_api_keys()), None)
     return ChatGroq(model=model, temperature=0.2, api_key=SecretStr(key) if key else None, **options)
 
 
+def _rotation(models: list[str], last_retries: int, **options):
+    """Try each model on every key before moving to the next model.
+
+    Groq rate limits apply per model and per account, so another key often
+    has quota left for the same (preferred) model. Only when every key is
+    limited does the request move on to the next model. The last entry keeps
+    a few retries so a brief outage on all of them still gets an answer.
+    """
+    keys = groq_api_keys() or [None]
+    chain = [(model, key) for model in models for key in keys]
+    if len(chain) == 1:
+        return _groq(models[0], keys[0], **options)
+    import groq
+
+    runnables = []
+    for position, (model, key) in enumerate(chain):
+        # gpt-oss models reason before answering; low effort keeps them fast and cheap.
+        extra = {"reasoning_effort": "low"} if model.startswith("openai/gpt-oss") else {}
+        retries = last_retries if position == len(chain) - 1 else 0
+        runnables.append(_groq(model, key, max_retries=retries, **extra, **options))
+    # A revoked or mistyped key also moves on to the next key instead of failing every request.
+    handled = (groq.RateLimitError, groq.InternalServerError, groq.APIConnectionError, groq.APITimeoutError,
+               groq.AuthenticationError, groq.PermissionDeniedError)
+    return runnables[0].with_fallbacks(runnables[1:], exceptions_to_handle=handled)
+
+
+def text_model_names() -> list[str]:
+    primary = os.getenv("GROQ_TEXT_MODEL", "qwen/qwen3.8-27b")
+    names = [name.strip() for name in os.getenv("GROQ_FALLBACK_MODELS", DEFAULT_FALLBACK_MODELS).split(",")]
+    return [primary, *dict.fromkeys(name for name in names if name and name != primary)]
+
+
 def build_text_model():
-    """Primary Groq model, handing off to other models when it is rate limited.
+    """Primary Groq model, handing off across keys and then models when rate limited.
 
     Groq limits are per model; on the free tier one model allows only ~1000
     output tokens per minute, so retrying the same model waits 40s+. Switching
-    to a fallback model answers in about a second instead.
+    key or model answers in about a second instead.
     """
-    primary = os.getenv("GROQ_TEXT_MODEL", "qwen/qwen3.8-27b")
-    names = [name.strip() for name in os.getenv("GROQ_FALLBACK_MODELS", DEFAULT_FALLBACK_MODELS).split(",")]
-    names = list(dict.fromkeys(name for name in names if name and name != primary))
-    if not names:
-        return _groq(primary)
-    import groq
+    return _rotation(text_model_names(), last_retries=2)
 
-    models = [_groq(primary, max_retries=0)]
-    for position, name in enumerate(names):
-        last = position == len(names) - 1
-        # gpt-oss models reason before answering; low effort keeps them fast and cheap.
-        options = {"reasoning_effort": "low"} if name.startswith("openai/gpt-oss") else {}
-        models.append(_groq(name, max_retries=2 if last else 0, **options))
-    handled = (groq.RateLimitError, groq.InternalServerError, groq.APIConnectionError, groq.APITimeoutError)
-    return models[0].with_fallbacks(models[1:], exceptions_to_handle=handled)
+
+def build_vision_model():
+    return _rotation([os.getenv("GROQ_VISION_MODEL", "qwen/qwen3.8-27b")], last_retries=1, timeout=30)
 
 
 def with_language(prompt: str, language: str | None) -> str:
@@ -115,7 +143,7 @@ class MultimodalRAG:
         self._vectorstore = None
         self._vectorstore_lock = Lock()
         self.text_model = build_text_model()
-        self.vision_model = _groq(os.getenv("GROQ_VISION_MODEL", "qwen/qwen3.8-27b"), timeout=30, max_retries=1)
+        self.vision_model = build_vision_model()
         self.summary_chain = ChatPromptTemplate.from_template(SUMMARY_PROMPT) | self.text_model | StrOutputParser()
 
     @property
