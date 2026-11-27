@@ -1,0 +1,24 @@
+# Store and check out text files with LF endings on every OS (the repo is
+# already LF; this stops Git's LF->CRLF warnings on Windows).
+* text=auto eol=lf
+
+# Windows-only scripts keep CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary files: never convert.
+*.doc binary
+*.docx binary
+*.pdf binary
+*.pptx binary
+*.xlsx binary
+*.xls binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.woff binary
+*.woff2 binary
