@@ -1,7 +1,9 @@
 import { HttpClient } from "./HttpClient";
 export { ApiError } from "./HttpClient";
 
-const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+// Production requests go through Vercel so the Render session cookie stays
+// same-site with the frontend. Local development can still target the API URL.
+const API_URL = import.meta.env.PROD ? "" : import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
 const client = new HttpClient(API_URL);
 const request = client.request.bind(client);
